@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler python3-pip
+
+      - name: Install Python deps
+        run: |
+          pip install grpcio grpcio-tools
+
+      - name: Generate protobuf code
+        run: |
+          python -m grpc_tools.protoc \
+            -I rpc \
+            --python_out=. \
+            --grpc_python_out=. \
+            rpc/neurosim.proto
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test
+
+      - name: Bench smoke
+        run: cargo run --release --bin bench_harness
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings

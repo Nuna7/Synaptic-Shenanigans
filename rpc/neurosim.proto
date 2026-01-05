@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package neurosim;
+
+service NeuroSim {
+    rpc Create   (SimConfig)     returns (Handle);
+    rpc Push     (InputEvent)    returns (Empty);
+    rpc Step     (StepRequest)   returns (StepReply);
+    rpc GetVoltages(Handle)      returns (VoltageReply);
+    rpc Free     (Handle)        returns (Empty);
+    rpc StreamSpikes(Handle) returns (stream Spike);
+}
+
+message Empty {}
+
+message SimConfig {
+    uint32 n_neurons = 1;
+    uint32 n_threads = 2;
+    uint64 seed      = 3;
+}
+
+message Handle {
+    uint64 id = 1;
+}
+
+message InputEvent {
+    uint64 sim_id = 1;
+    float  time   = 2;
+    uint32 neuron = 3;
+    float  weight = 4;
+}
+
+message StepRequest {
+    uint64 sim_id    = 1;
+    float until_time = 2;
+}
+
+message Spike {
+    float time = 1;
+    uint32 neuron = 2;
+}
+
+message StepReply {
+    repeated Spike spikes = 1;
+}
+
+message VoltageReply {
+    repeated float volts = 1;
+}
