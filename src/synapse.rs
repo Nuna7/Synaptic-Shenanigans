@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -13,7 +14,14 @@ pub struct Synapse {
     pub spike_queue: Vec<VecDeque<bool>>,
 }
 
+impl Default for Synapse {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Synapse {
+
     pub fn new() -> Self {
         Self {
             pre: Vec::new(),
@@ -25,6 +33,10 @@ impl Synapse {
             e_rev: Vec::new(),
             spike_queue: Vec::new(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn add_current_based(
@@ -46,6 +58,7 @@ impl Synapse {
         self.spike_queue.push(VecDeque::from(vec![false; delay_steps]));
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_conductance_based(
         &mut self,
         pre: usize,

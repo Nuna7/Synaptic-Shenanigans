@@ -1,8 +1,5 @@
-use synaptic_shenanigans::lif::LifNeuron;
-use synaptic_shenanigans::synapse::Synapse;
-use synaptic_shenanigans::simulation::{Simulation, SchedulerMode};
-
 mod utils;
+use synaptic_shenanigans::simulation::SchedulerMode;
 
 use crate::utils::build_sim;
 

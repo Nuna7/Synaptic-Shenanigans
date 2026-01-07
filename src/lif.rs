@@ -10,6 +10,10 @@ pub trait NeuronPopulation {
     fn len(&self) -> usize;
     fn split_indices(&self, chunk: usize) -> Vec<NeuronPartition>;
     fn step_range(&self, input_current: &[f32], start: usize);
+    #[allow(dead_code)]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 pub struct LifNeuron {
@@ -65,7 +69,7 @@ impl NeuronPopulation for LifNeuron {
 
     fn split_indices(&self, chunk: usize) -> Vec<NeuronPartition> {
         let n = self.v.len();
-        let num_parts = (n + chunk - 1) / chunk;
+        let num_parts = n.div_ceil(chunk);
 
         (0..num_parts)
             .map(|p| {
@@ -82,7 +86,8 @@ impl NeuronPopulation for LifNeuron {
     fn step_range(&self, input_current: &[f32], start: usize) {
         let len = input_current.len();
 
-        for local_i in 0..len {
+        //for local_i in 0..len {
+        for (local_i, input_cur) in input_current.iter().enumerate().take(len) {
             let i = start + local_i; // map back to global index            
             let dt_i = self.dt[i];
 
@@ -103,7 +108,7 @@ impl NeuronPopulation for LifNeuron {
 
             let v_old = self.v[i].load();
             let dv =
-                (-(v_old - self.v_rest[i]) + self.r_m[i] * input_current[local_i]) 
+                (-(v_old - self.v_rest[i]) + self.r_m[i] * input_cur)//input_current[local_i]) 
                 * (dt_i / self.tau_m[i]);
 
             let v_new = v_old + dv;

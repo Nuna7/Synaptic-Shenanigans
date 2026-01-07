@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::event::Event;
 use crate::lif::{LifNeuron, NeuronPopulation};
 use crate::synapse::Synapse;
@@ -19,7 +20,14 @@ pub struct ThreadLocal {
     pub local_spike_log: Vec<(f32, usize, usize)>,
 }
 
+impl Default for ThreadLocal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThreadLocal {
+
     pub fn new() -> Self {
         Self {
             local_queue: Vec::new(),
@@ -114,16 +122,8 @@ impl Simulation {
         ((t / self.dt) as f64 + 1e-9).floor() as u64
     }
 
-    // fn owner_of(&self, neuron_id: usize) -> usize {
-    //     if self.num_threads <= 1 {
-    //         return 0;
-    //     }
-    //     let chunk = (self.neurons.len() + self.num_threads - 1) / self.num_threads;
-    //     (neuron_id / chunk).min(self.neurons.len().saturating_sub(1) / chunk)
-    // }
-
     fn owner_of(&self, neuron_id: usize) -> usize {
-        let chunk = (self.neurons.len() + self.num_threads - 1) / self.num_threads;
+        let chunk = self.neurons.len().div_ceil(self.num_threads);
         let owner = neuron_id / chunk;
 
         // clamp to last *real* partition
@@ -143,7 +143,7 @@ impl Simulation {
             return;
         }
         let t = self.num_threads;
-        let chunk = (n + t - 1) / t;
+        let chunk = n.div_ceil(t);
         let pre_index = Arc::new(self.pre_index.clone());
         let syn = Arc::clone(&self.synapses);
         let neurons = Arc::clone(&self.neurons);
@@ -168,7 +168,6 @@ impl Simulation {
             // distribute by owner
             let mut in_queues: Vec<Vec<Event>> = vec![Vec::new(); t];
             for ev in events_at_t {
-                //let owner = self.owner_of(ev.target);
                 let owner = self.owner_of(ev.target);
                 in_queues[owner].push(ev);
             }
@@ -196,7 +195,7 @@ impl Simulation {
                     let in_q = std::mem::take(&mut in_queues[tid]);
 
                     // partition indices
-                    let part = partitions[tid].clone();
+                    let part = partitions[tid];
 
                     handles.push(scope.spawn(move || {
                         // Build local input buffer for this partition
@@ -267,8 +266,6 @@ impl Simulation {
 
                     // assign seqs deterministically and push events into owning local queues
                     for mut ev in new_events {
-                        //ev.seq = self.next_seq;
-                        //self.next_seq = self.next_seq.wrapping_add(1);
                         ev.seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
                         let owner_post = self.owner_of(ev.target);
                         self.thread_locals[owner_post].local_queue.push(ev);
@@ -385,8 +382,6 @@ impl Simulation {
             // Drain new events into thread locals (nondeterministic order)
             let mut new_events = global_new_events.lock();
             for mut ev in new_events.drain(..) {
-                //ev.seq = self.next_seq;
-                //self.next_seq = self.next_seq.wrapping_add(1);
                 ev.seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
 
                 let owner = self.owner_of(ev.target);
@@ -440,22 +435,13 @@ impl Simulation {
         for tl in &self.thread_locals {
             estimated_total += tl.local_queue.len();
         }
-        //let mut all: Vec<(usize, Event)> = Vec::with_capacity(estimated_total);
         let mut all: Vec<Event> = Vec::with_capacity(estimated_total);
 
-        for (tid, tl) in self.thread_locals.iter_mut().enumerate() {
+        for tl in self.thread_locals.iter_mut() {
             for ev in tl.local_queue.drain(..) {
-                //all.push((tid, ev));
                 all.push(ev);
             }
         }
-
-        // all.sort_by(|(tid_a, a), (tid_b, b)| {
-        //     a.tick
-        //         .cmp(&b.tick)
-        //         .then(a.seq.cmp(&b.seq))
-        //         .then(tid_a.cmp(&tid_b))
-        // });
 
         all.sort_by(|a, b| {
             a.tick
@@ -526,7 +512,7 @@ impl Simulation {
             }
 
             processed_events += 1;
-            if processed_events % 100 == 0 && self.verbose {
+            if processed_events.is_multiple_of(100) && self.verbose {
                 eprintln!("Processed {} events @ t={:.2}", processed_events, self.time);
             }
 
@@ -553,13 +539,12 @@ impl Simulation {
             }
 
             for ev in events_at_t {
-                //let owner = self.owner_of(ev.target);
                 let owner = self.owner_of(ev.target);
                 self.thread_locals[owner].local_queue.push(ev);
             }
 
             let t = self.num_threads;
-            let chunk = if t <= 1 { n } else { (n + t - 1) / t };
+            let chunk = if t <= 1 { n } else { n.div_ceil(t) };
 
             for tid in 0..self.num_threads {
                 let start = tid * chunk;
@@ -578,8 +563,8 @@ impl Simulation {
                         .then(a.target.cmp(&b.target))
                 });
 
-                for i in start..end {
-                    inputs[i] = 0.0;
+                for input in inputs.iter_mut().take(end).skip(start){
+                    *input = 0.0;
                 }
 
                 for ev in &to_process {
@@ -591,7 +576,6 @@ impl Simulation {
                             inputs[ev.target] += ev.weight * (ev.e_rev - v_post);
                         }
                     } else {
-                        //let owner = self.owner_of(ev.target);
                         let owner = self.owner_of(ev.target);
                         if owner != tid {
                             self.thread_locals[owner].local_queue.push(ev.clone());
@@ -629,7 +613,6 @@ impl Simulation {
                                         e_rev,
                                     };
 
-                                    //self.next_seq = self.next_seq.wrapping_add(1);
                                     let owner_post = self.owner_of(post);
                                     self.thread_locals[owner_post].local_queue.push(ev);
                                 }
@@ -641,11 +624,10 @@ impl Simulation {
 
             self.merge_queues_into_global();
 
-            if let Some(peek) = self.event_queue.peek() {
-                if self.verbose {
+            if let Some(peek) = self.event_queue.peek()
+                && self.verbose {
                     eprintln!("Next event in heap: tick={} t={}", peek.tick, peek.time);
                 }
-            }
 
             self.merge_spike_logs();
         }
@@ -687,7 +669,6 @@ impl Simulation {
         let n = self.neurons.len();
         let snap = Snapshot {
             time: self.time,
-            //next_seq: self.next_seq,
             next_seq: self.next_seq.load(Ordering::Relaxed),
             v: (0..n).map(|i| self.neurons.read_v(i)).collect(),
             spiked: (0..n).map(|i| self.neurons.local_spiked(i)).collect(),
@@ -705,7 +686,7 @@ impl Simulation {
         };
 
         let encoded = bincode::serialize(&snap).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::Other, format!("bincode serialize: {}", e))
+            std::io::Error::other(format!("bincode serialize: {}", e))
         })?;
         fs::write(path, &encoded)?;
 
@@ -739,10 +720,8 @@ impl Simulation {
 
         let bytes = fs::read(path)?;
         let snap: Snapshot = bincode::deserialize(&bytes).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::Other, format!("bincode deserialize: {}", e))
+            std::io::Error::other(format!("bincode deserialize: {}", e))
         })?;
-
-        let n = snap.v.len();
 
         // build a LifNeuron using the saved parameter vectors and values
         let neurons = LifNeuron {
@@ -760,7 +739,6 @@ impl Simulation {
 
         let mut sim = Simulation::new_with_seed(neurons, snap.synapses, snap.dt, seed, num_threads);
         sim.time = snap.time;
-        //sim.next_seq = snap.next_seq;
         sim.next_seq.store(snap.next_seq, Ordering::Relaxed);
         sim.pre_index = snap.pre_index;
         

@@ -15,8 +15,7 @@ fn build_sim(seed: u64, n_threads: usize) -> Simulation {
     synapses.add_current_based(0, 1, 1000.0, 2.0, 10.0, 3);
     synapses.add_conductance_based(1, 0, 1000.0, 3.0, 8.0, 0.0, 2);
 
-    let mut sim = Simulation::new_with_seed(neurons, synapses, 1.0, seed, n_threads);
-    sim
+    Simulation::new_with_seed(neurons, synapses, 1.0, seed, n_threads)
 }
 
 fn main() {
