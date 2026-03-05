@@ -1,19 +1,3 @@
-"""
-High-level Python wrapper for the synaptic-shenanigans FFI.
-
-Assumes the Rust library exports:
-
-    SimHandle (opaque)
-    sim_create_basic(n_neurons: c_int, n_threads: c_int, seed: c_ulong) -> *mut SimHandle
-    sim_free(*mut SimHandle)
-    sim_push_current(handle, time: c_float, target: c_int, weight: c_float) -> c_int
-    sim_step_and_query(handle, end_time: c_float) -> c_int
-    sim_spike_count(handle) -> c_int
-    sim_get_spikes(handle, out: *mut FfiSpike, max_len: c_int) -> c_int
-    sim_get_voltage(handle, neuron: c_int, out_v: *mut c_float) -> c_int
-    sim_save_checkpoint(handle, path: *const c_char) -> c_int
-"""
-
 import ctypes as ct
 import os
 import sys
@@ -31,15 +15,12 @@ def _default_lib_name() -> str:
     elif os.name == "nt":
         return "synaptic_shenanigans.dll"
     else:
-        # fallback; user can override via NEUROSIM_LIB
         return "libsynaptic_shenanigans.so"
 
 
 def _load_lib() -> ct.CDLL:
-    # Allow override via env var
     lib_path = os.environ.get("NEUROSIM_LIB")
     if lib_path is None:
-        # default to target/release/...
         base = os.path.dirname(os.path.abspath(__file__))
         candidate = os.path.join(base, "target", "release", _default_lib_name())
         lib_path = candidate
@@ -63,30 +44,36 @@ class FfiSpike(ct.Structure):
     ]
 
 
-# Return types
-_lib.sim_create_basic.restype = ct.POINTER(SimHandle)
-
-# Argument types
+# sim_create_basic
+_lib.sim_create_basic.restype  = ct.POINTER(SimHandle)
 _lib.sim_create_basic.argtypes = [ct.c_int, ct.c_int, ct.c_ulong]
-_lib.sim_free.argtypes = [ct.POINTER(SimHandle)]
 
+# sim_free
+_lib.sim_free.argtypes = [ct.POINTER(SimHandle)]
+_lib.sim_free.restype  = None
+
+# sim_push_current
 _lib.sim_push_current.argtypes = [
     ct.POINTER(SimHandle),
-    ct.c_float,
-    ct.c_int,
-    ct.c_float,
+    ct.c_float,   # time
+    ct.c_int,     # target neuron
+    ct.c_float,   # weight
 ]
 _lib.sim_push_current.restype = ct.c_int
 
-_lib.sim_step_and_query.argtypes = [
-    ct.POINTER(SimHandle),
-    ct.c_float,
-]
-_lib.sim_step_and_query.restype = ct.c_int
+# sim_step_and_query
+_lib.sim_step_and_query.argtypes = [ct.POINTER(SimHandle), ct.c_float]
+_lib.sim_step_and_query.restype  = ct.c_int
 
+# sim_spike_count
 _lib.sim_spike_count.argtypes = [ct.POINTER(SimHandle)]
-_lib.sim_spike_count.restype = ct.c_int
+_lib.sim_spike_count.restype  = ct.c_int
 
+# sim_clear_spikes  — clears the spike log in-place
+_lib.sim_clear_spikes.argtypes = [ct.POINTER(SimHandle)]
+_lib.sim_clear_spikes.restype  = ct.c_int
+
+# sim_get_spikes
 _lib.sim_get_spikes.argtypes = [
     ct.POINTER(SimHandle),
     ct.POINTER(FfiSpike),
@@ -94,6 +81,7 @@ _lib.sim_get_spikes.argtypes = [
 ]
 _lib.sim_get_spikes.restype = ct.c_int
 
+# sim_get_voltage
 _lib.sim_get_voltage.argtypes = [
     ct.POINTER(SimHandle),
     ct.c_int,
@@ -101,12 +89,18 @@ _lib.sim_get_voltage.argtypes = [
 ]
 _lib.sim_get_voltage.restype = ct.c_int
 
-_lib.sim_save_checkpoint.argtypes = [
-    ct.POINTER(SimHandle),
-    ct.c_char_p,
-]
-_lib.sim_save_checkpoint.restype = ct.c_int
+# sim_save_checkpoint
+_lib.sim_save_checkpoint.argtypes = [ct.POINTER(SimHandle), ct.c_char_p]
+_lib.sim_save_checkpoint.restype  = ct.c_int
 
+_lib.sim_get_time.argtypes       = [ct.POINTER(SimHandle), ct.POINTER(ct.c_float)]
+_lib.sim_get_time.restype        = ct.c_int
+
+_lib.sim_set_scheduler.argtypes  = [ct.POINTER(SimHandle), ct.c_int, ct.c_int]
+_lib.sim_set_scheduler.restype   = ct.c_int
+
+_lib.sim_load_checkpoint.argtypes = [ct.c_char_p, ct.c_ulong, ct.c_int]
+_lib.sim_load_checkpoint.restype  = ct.POINTER(SimHandle)
 
 # -------------------------------------------------------------------
 # High-level Python wrapper
@@ -114,28 +108,43 @@ _lib.sim_save_checkpoint.restype = ct.c_int
 
 class NeuroSim:
     """
-    High-level object-oriented wrapper around the C ABI.
+    High-level object-oriented wrapper around the Rust C ABI.
 
     Usage:
         sim = NeuroSim.basic(n_neurons=2, n_threads=1, seed=42)
         sim.push_current(time=0.0, neuron=0, weight=400.0)
         sim.run_until(400.0)
         spikes = sim.get_spikes()
-        v0 = sim.get_voltage(0)
+        v0     = sim.get_voltage(0)
         sim.close()
+
+    Context-manager protocol is supported:
+        with NeuroSim.basic(2) as sim:
+            ...
     """
 
-    def __init__(self, handle: ct.POINTER(SimHandle), n_neurons: int, n_threads: int, seed: int):
-        self._handle = handle
+    def __init__(
+        self,
+        handle: ct.POINTER(SimHandle),
+        n_neurons: int,
+        n_threads: int,
+        seed: int,
+    ):
+        self._handle   = handle
         self.n_neurons = n_neurons
         self.n_threads = n_threads
-        self.seed = seed
-        self._closed = False
+        self.seed      = seed
+        self._closed   = False
 
     # ---- constructors ------------------------------------------------
 
     @classmethod
-    def basic(cls, n_neurons: int, n_threads: int = 1, seed: int = 42) -> "NeuroSim":
+    def basic(
+        cls,
+        n_neurons: int,
+        n_threads: int = 1,
+        seed: int = 42,
+    ) -> "NeuroSim":
         h = _lib.sim_create_basic(
             ct.c_int(n_neurons),
             ct.c_int(n_threads),
@@ -145,7 +154,7 @@ class NeuroSim:
             raise RuntimeError("sim_create_basic returned NULL")
         return cls(h, n_neurons=n_neurons, n_threads=n_threads, seed=seed)
 
-    # ---- low-level lifetime management -------------------------------
+    # ---- lifetime management -----------------------------------------
 
     def close(self) -> None:
         if not self._closed and self._handle:
@@ -154,7 +163,6 @@ class NeuroSim:
             self._handle = None
 
     def __del__(self) -> None:
-        # best-effort; avoid raising in destructor
         try:
             self.close()
         except Exception:
@@ -169,9 +177,8 @@ class NeuroSim:
     # ---- simulation control ------------------------------------------
 
     def push_current(self, time: float, neuron: int, weight: float) -> None:
-        """Inject a current-based event: I(t) into neuron."""
-        if self._closed:
-            raise RuntimeError("Simulation is closed")
+        """Inject a current-based event into *neuron* at *time*."""
+        self._require_open()
         ret = _lib.sim_push_current(
             self._handle,
             ct.c_float(time),
@@ -179,131 +186,162 @@ class NeuroSim:
             ct.c_float(weight),
         )
         if ret != 0:
-            raise RuntimeError(f"sim_push_current failed with code {ret}")
+            raise RuntimeError(f"sim_push_current failed (code {ret})")
+
+    # Alias used by inject_spike and other helpers
+    inject_current = push_current
 
     def run_until(self, end_time: float) -> None:
-        """Advance simulation until (inclusive) `end_time`."""
-        if self._closed:
-            raise RuntimeError("Simulation is closed")
+        """Advance simulation up to and including *end_time* ms."""
+        self._require_open()
         ret = _lib.sim_step_and_query(self._handle, ct.c_float(end_time))
         if ret != 0:
-            raise RuntimeError(f"sim_step_and_query failed with code {ret}")
+            raise RuntimeError(f"sim_step_and_query failed (code {ret})")
 
-    # ---- observables -------------------------------------------------
+    # ---- spike log ---------------------------------------------------
 
     def spike_count(self) -> int:
-        if self._closed:
-            raise RuntimeError("Simulation is closed")
+        """Return the total number of spikes recorded so far."""
+        self._require_open()
         return int(_lib.sim_spike_count(self._handle))
 
     def get_spikes(self) -> List[Tuple[float, int]]:
         """
-        Snapshot of current spike log as list of (time, neuron_id).
+        Return the full spike log as ``[(time_ms, neuron_id), ...]``.
 
-        (We allocate a buffer of size spike_count, call sim_get_spikes,
-         then slice to the actual number copied.)
+        The list grows monotonically; use :meth:`clear_spikes` to reset it.
         """
         n = self.spike_count()
         if n <= 0:
             return []
-
-        buf = (FfiSpike * n)()
+        buf    = (FfiSpike * n)()
         copied = _lib.sim_get_spikes(self._handle, buf, ct.c_int(n))
         if copied < 0:
-            raise RuntimeError(f"sim_get_spikes failed with code {copied}")
+            raise RuntimeError(f"sim_get_spikes failed (code {copied})")
+        return [(float(buf[i].time), int(buf[i].neuron_id)) for i in range(copied)]
 
-        out = []
-        for i in range(copied):
-            out.append((float(buf[i].time), int(buf[i].neuron_id)))
-        return out
+    def clear_spikes(self) -> None:
+        """Clear the spike log.  Neuron membrane states are preserved."""
+        self._require_open()
+        ret = _lib.sim_clear_spikes(self._handle)
+        if ret != 0:
+            raise RuntimeError(f"sim_clear_spikes failed (code {ret})")
+
+    # ---- voltage queries ---------------------------------------------
 
     def get_voltage(self, neuron: int) -> float:
-        """Read membrane potential v of one neuron."""
+        """Read the membrane potential (mV) of *neuron*."""
         if neuron < 0 or neuron >= self.n_neurons:
-            raise IndexError(f"neuron index {neuron} out of range [0, {self.n_neurons})")
-        v = ct.c_float()
-        ret = _lib.sim_get_voltage(self._handle, ct.c_int(neuron), ct.byref(v))
+            raise IndexError(
+                f"neuron index {neuron} out of range [0, {self.n_neurons})"
+            )
+        v   = ct.c_float()
+        ret = _lib.sim_get_voltage(
+            self._handle, ct.c_int(neuron), ct.byref(v)
+        )
         if ret != 0:
-            raise RuntimeError(f"sim_get_voltage failed with code {ret}")
+            raise RuntimeError(f"sim_get_voltage failed (code {ret})")
         return float(v.value)
+
+    def get_all_voltages(self) -> List[float]:
+        """Read membrane potentials for all neurons."""
+        return [self.get_voltage(i) for i in range(self.n_neurons)]
 
     # ---- checkpointing -----------------------------------------------
 
     def save_checkpoint(self, path: str) -> None:
         """
-        Save deterministic checkpoint + .sha256 hash (Rust side handles hash file).
+        Persist simulation state to *path*.
 
-        The Rust side writes:
-            path
-            path + ".sha256"
+        The Rust side also writes ``path + ".sha256"`` for integrity checking.
         """
+        self._require_open()
+        ret = _lib.sim_save_checkpoint(
+            self._handle, ct.c_char_p(path.encode("utf-8"))
+        )
+        if ret != 0:
+            raise RuntimeError(f"sim_save_checkpoint failed (code {ret})")
+
+    # ---- time-stepping helpers ---------------------------------------
+
+    def current_time(self) -> float:
+        """Return current simulation time (ms) via FFI — exact, not approximate."""
         if self._closed:
             raise RuntimeError("Simulation is closed")
-        bpath = path.encode("utf-8")
-        ret = _lib.sim_save_checkpoint(self._handle, ct.c_char_p(bpath))
+        t = ct.c_float()
+        ret = _lib.sim_get_time(self._handle, ct.byref(t))
         if ret != 0:
-            raise RuntimeError(f"sim_save_checkpoint failed with code {ret}")
-        
-        # ---- session / lifecycle API -----------------------------------------
+            raise RuntimeError(f"sim_get_time failed with code {ret}")
+        return float(t.value)
 
-    def reset(self):
-        """
-        Reset spike log but keep neuron states intact for closed-loop work.
-        If a full state reset is needed, recreate NeuroSim.basic().
-        """
-        # Easiest: free + recreate, but let's keep ABI cheap:
-        self.run_until(self.time)  # no-op ensures sim is synced
-        self.spikes_last_read = 0
-
-    # ---- time-stepping helpers -------------------------------------------
-
-    def run_for(self, duration: float):
-        """
-        Run for relative time (t -> t + duration).
-        """
+    def run_for(self, duration: float) -> None:
+        """Advance the simulation by *duration* ms relative to the current time."""
         if duration < 0:
-            raise ValueError("Duration must be >= 0")
-        target = self.current_time() + duration
-        self.run_until(target)
+            raise ValueError("duration must be >= 0")
+        self.run_until(self.current_time() + duration)
 
-    def step(self, dt: float = 1.0):
+    def step(self, dt: float = 1.0) -> List[Tuple[float, int]]:
         """
-        Single control-loop step: run_for(dt), return latest spikes.
+        Single closed-loop step: advance by *dt* ms then return all spikes.
+
+        This does **not** auto-clear the log; callers that only want new spikes
+        should call :meth:`clear_spikes` before :meth:`step`, or use the
+        timestamp to filter.
         """
         self.run_for(dt)
         return self.get_spikes()
 
-    # ---- querying helpers -------------------------------------------------
+    def reset(self) -> None:
+        """
+        Clear the spike log while keeping neuron membrane states intact.
 
-    def current_time(self) -> float:
+        Useful for closed-loop control loops where you want per-step spike
+        counts without recreating the simulation.  For a full state reset,
+        recreate with :meth:`basic`.
         """
-        Read time by probing spike timestamps if ABI doesn't expose time.
-        For your ABI this isn't exported, so we approximate via last event.
-        Extension: add sim_get_time in Rust to expose it properly.
-        """
-        # This is placeholder logic and can be replaced once ABI exposes time
-        spikes = self.get_spikes()
-        if spikes:
-            return spikes[-1][0]
-        return 0.0
+        self.clear_spikes()
 
-    def get_all_voltages(self):
-        """
-        Pull full state vector v(t).
-        """
-        return [self.get_voltage(i) for i in range(self.n_neurons)]
+    # ---- stimulation helpers ----------------------------------------
 
-    # ---- optional stimulation abstraction --------------------------------
-
-    def inject_spike(self, neuron: int, weight: float = 400.0, at_time: Optional[float] = None):
+    def inject_spike(
+        self,
+        neuron: int,
+        weight: float = 400.0,
+        at_time: Optional[float] = None,
+    ) -> None:
         """
-        Handy abstraction: inject event "now" by default or delayed.
+        Inject a current pulse into *neuron*.
+
+        If *at_time* is ``None``, the event is scheduled at the current
+        estimated simulation time.
         """
         if at_time is None:
             at_time = self.current_time()
         self.push_current(at_time, neuron, weight)
 
+    def set_scheduler(self, mode: int, n_threads: int = 1) -> None:
+        """Set scheduler mode. mode=0: single-threaded, mode=1: deterministic-MT."""
+        if self._closed:
+            raise RuntimeError("Simulation is closed")
+        ret = _lib.sim_set_scheduler(self._handle, ct.c_int(mode), ct.c_int(n_threads))
+        if ret != 0:
+            raise RuntimeError(f"sim_set_scheduler failed: {ret}")
+        
+    @classmethod
+    def from_checkpoint(cls, path: str, seed: int = 42, n_threads: int = 1) -> "NeuroSim":
+        """Load a simulation from a checkpoint file."""
+        bpath = path.encode("utf-8")
+        h = _lib.sim_load_checkpoint(ct.c_char_p(bpath), ct.c_ulong(seed), ct.c_int(n_threads))
+        if not h:
+            raise RuntimeError(f"sim_load_checkpoint returned NULL for path: {path}")
+        # n_neurons unknown from checkpoint alone — set to 0, user can override
+        return cls(h, n_neurons=0, n_threads=n_threads, seed=seed)
+
+    # ---- internals ---------------------------------------------------
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("NeuroSim instance is closed")
 
 
-# Convenience alias
 __all__ = ["NeuroSim", "FfiSpike"]

@@ -2,48 +2,100 @@ syntax = "proto3";
 
 package neurosim;
 
-service NeuroSim {
-    rpc Create   (SimConfig)     returns (Handle);
-    rpc Push     (InputEvent)    returns (Empty);
-    rpc Step     (StepRequest)   returns (StepReply);
-    rpc GetVoltages(Handle)      returns (VoltageReply);
-    rpc Free     (Handle)        returns (Empty);
-    rpc StreamSpikes(Handle) returns (stream Spike);
-}
+// ── Shared ────────────────────────────────────────────────────────────────────
 
 message Empty {}
 
-message SimConfig {
-    uint32 n_neurons = 1;
-    uint32 n_threads = 2;
-    uint64 seed      = 3;
+message Handle {
+  uint64 id = 1;
 }
 
-message Handle {
-    uint64 id = 1;
+// ── Simulation creation ───────────────────────────────────────────────────────
+
+message SimConfig {
+  uint32 n_neurons  = 1;
+  uint32 n_threads  = 2;
+  uint64 seed       = 3;
+  // 0 = SingleThreaded (default), 1 = Deterministic
+  uint32 scheduler  = 4;
 }
+
+// ── Input events ──────────────────────────────────────────────────────────────
 
 message InputEvent {
-    uint64 sim_id = 1;
-    float  time   = 2;
-    uint32 neuron = 3;
-    float  weight = 4;
+  uint64 sim_id  = 1;
+  float  time    = 2;
+  uint32 neuron  = 3;
+  float  weight  = 4;
 }
 
+// ── Stepping ──────────────────────────────────────────────────────────────────
+
 message StepRequest {
-    uint64 sim_id    = 1;
-    float until_time = 2;
+  uint64 sim_id     = 1;
+  float  until_time = 2;
 }
 
 message Spike {
-    float time = 1;
-    uint32 neuron = 2;
+  float  time   = 1;
+  uint32 neuron = 2;
 }
 
 message StepReply {
-    repeated Spike spikes = 1;
+  repeated Spike spikes = 1;
 }
 
+// ── Voltage queries ───────────────────────────────────────────────────────────
+
 message VoltageReply {
-    repeated float volts = 1;
+  repeated float volts = 1;
+}
+
+// ── Spike log queries (added — were in rpc.rs but missing from proto) ─────────
+
+message CountReply {
+  int32 count = 1;
+}
+
+// ── Time query (added — was in rpc.rs but missing from proto) ────────────────
+
+message TimeReply {
+  float time = 1;
+}
+
+// ── Checkpointing (added — was in rpc.rs but missing from proto) ─────────────
+
+message CheckpointRequest {
+  uint64 sim_id = 1;
+  string path   = 2;
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+service NeuroSim {
+  // Lifecycle
+  rpc Create      (SimConfig)          returns (Handle);
+  rpc Free        (Handle)             returns (Empty);
+
+  // Input
+  rpc Push        (InputEvent)         returns (Empty);
+
+  // Stepping
+  rpc Step        (StepRequest)        returns (StepReply);
+
+  // Voltage
+  rpc GetVoltages (Handle)             returns (VoltageReply);
+
+  // Spike log management
+  rpc GetSpikeCount  (Handle)          returns (CountReply);
+  rpc ClearSpikes    (Handle)          returns (Empty);
+
+  // Time
+  rpc GetTime     (Handle)             returns (TimeReply);
+
+  // Checkpointing
+  rpc SaveCheckpoint (CheckpointRequest) returns (Empty);
+
+  // Streaming
+  rpc StreamSpikes   (Handle)          returns (stream Spike);
 }

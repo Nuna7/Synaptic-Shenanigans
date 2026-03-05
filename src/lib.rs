@@ -1,9 +1,31 @@
 #![cfg_attr(not(feature = "ffi"), allow(dead_code))]
 
+// ── Core modules ──────────────────────────────────────────────────────────────
 pub mod event;
 pub mod lif;
 pub mod simulation;
 pub mod synapse;
+
+// ── Neuron models ─────────────────────────────────────────────────────────────
+pub mod izhikevich;     // multi-type spiking (RS, FS, IB, CH, LTS, RZ)
+pub mod hodgkin_huxley; // biophysical Na+/K+/leak conductances
+pub mod adex;           // Adaptive Exponential Integrate-and-Fire
+
+// ── Plasticity ────────────────────────────────────────────────────────────────
+pub mod plasticity;     // STDP (Hebbian, nearest-neighbour)
+pub mod homeostatic;    // intrinsic excitability regulation
+pub mod synaptic_scaling; // multiplicative weight homeostasis
+
+// ── Network topology ──────────────────────────────────────────────────────────
+pub mod network;        // Erdős-Rényi, Watts-Strogatz, Barabási-Albert, Layered
+
+// ── Input generation ──────────────────────────────────────────────────────────
+pub mod poisson;        // homogeneous + inhomogeneous Poisson processes
+
+// ── Analysis ──────────────────────────────────────────────────────────────────
+pub mod metrics;        // synchrony, bursts, power spectrum, avalanches
+
+// ── FFI ───────────────────────────────────────────────────────────────────────
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_float, c_int, c_ulong};
@@ -12,292 +34,173 @@ use crate::simulation::{Simulation, SchedulerMode};
 use crate::lif::{LifNeuron, NeuronPopulation};
 use crate::synapse::Synapse;
 
-/// Opaque handle exposed to C / Python.
-///
-/// From C you only see a pointer to this struct.
 #[repr(C)]
-pub struct SimHandle {
-    sim: *mut Simulation,
-}
+pub struct SimHandle { sim: *mut Simulation }
 
-/// Simple C-side representation of a spike: (time, neuron_id)
 #[repr(C)]
-pub struct FfiSpike {
-    pub time: c_float,
-    pub neuron_id: c_int,
-}
+pub struct FfiSpike { pub time: c_float, pub neuron_id: c_int }
 
-// ----------------------
-// Construction / teardown
-// ----------------------
+// ── Construction ──────────────────────────────────────────────────────────────
 
-/// Create a new simulation and return an opaque handle.
-///
-/// # Safety
-/// - The returned pointer must eventually be passed to `sim_free` exactly once.
-/// - The returned handle must not be accessed after being freed.
-/// - The caller must not concurrently use the same handle from multiple threads
-///   unless externally synchronized.
+/// Create a simulation with LIF neurons and empty synapse set.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_create_basic(
-    n_neurons: c_int,
-    n_threads: c_int,
-    seed: c_ulong,
+    n_neurons: c_int, n_threads: c_int, seed: c_ulong,
 ) -> *mut SimHandle {
-    let neurons = LifNeuron::new(
-        n_neurons as usize,
-        -65.0, // v_rest
-        -50.0, // v_thresh
-        20.0,  // tau_m
-        1.0,   // r_m
-        1.0,   // dt
-        5.0,   // refractory_period
-    );
-
-    let syn = Synapse::new();
-    let sim = Simulation::new_with_seed(neurons, syn, 1.0, seed, n_threads as usize);
-
-    let boxed_sim = Box::new(sim);
-    let handle = Box::new(SimHandle {
-        sim: Box::into_raw(boxed_sim),
-    });
-    Box::into_raw(handle)
+    let neurons = LifNeuron::new(n_neurons as usize, -65.0, -50.0, 20.0, 1.0, 1.0, 5.0);
+    let sim     = Simulation::new_with_seed(neurons, Synapse::new(), 1.0, seed, n_threads as usize);
+    Box::into_raw(Box::new(SimHandle { sim: Box::into_raw(Box::new(sim)) }))
 }
 
 /// Free a simulation handle.
-///
-/// # Safety
-/// - `handle` must be a pointer previously returned by `sim_create_basic`.
-/// - `handle` must not have been freed already.
-/// - No other thread may be using the handle while this function is called.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_free(handle: *mut SimHandle) {
-    if handle.is_null() {
-        return;
-    }
-
-    // SAFETY: caller must provide a valid pointer previously returned by sim_create_basic,
-    // and must ensure no other references remain.
+    if handle.is_null() { return; }
     unsafe {
-        let handle_box = Box::from_raw(handle);
-        if !handle_box.sim.is_null() {
-            // Reconstruct Box<Simulation> and drop it.
-            let _ = Box::from_raw(handle_box.sim);
-        }
-        // `handle_box` (Box<SimHandle>) drops here; it contains only a raw pointer field.
+        let h = Box::from_raw(handle);
+        if !h.sim.is_null() { let _ = Box::from_raw(h.sim); }
     }
 }
 
-// ----------------------
-// Core stepping / control
-// ----------------------
+// ── Stepping ──────────────────────────────────────────────────────────────────
 
-/// Advance the simulation until `end_time`.
-///
-/// # Safety
-/// - `handle` must be a valid, non-null pointer returned by `sim_create_basic`.
-/// - The handle must not have been freed.
-/// - No concurrent access to the same handle is allowed during this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sim_step_and_query(
-    handle: *mut SimHandle,
-    end_time: c_float,
-) -> c_int {
-    if handle.is_null() {
-        return -1;
-    }
-
-    // SAFETY: pointer validity / exclusivity guaranteed by caller contract.
+pub unsafe extern "C" fn sim_step_and_query(handle: *mut SimHandle, end_time: c_float) -> c_int {
+    if handle.is_null() { return -1; }
     unsafe {
         let sim = &mut *(*handle).sim;
         sim.scheduler_mode = SchedulerMode::SingleThreaded;
         sim.run_auto(end_time);
     }
-
     0
 }
 
-// ----------------------
-// External input / events
-// ----------------------
+// ── Scheduler control — NEW ───────────────────────────────────────────────────
 
-/// Inject a current-based external event.
-///
-/// # Safety
-/// - `handle` must be a valid, non-null pointer returned by `sim_create_basic`.
-/// - The handle must not have been freed.
-/// - The simulation must not be concurrently accessed from another thread.
+/// Set scheduler mode. mode=0 → SingleThreaded, mode=1 → Deterministic(n_threads).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sim_set_scheduler(
+    handle: *mut SimHandle, mode: c_int, n_threads: c_int,
+) -> c_int {
+    if handle.is_null() { return -1; }
+    unsafe {
+        let sim = &mut *(*handle).sim;
+        sim.scheduler_mode = match mode {
+            0 => SchedulerMode::SingleThreaded,
+            1 => SchedulerMode::Deterministic { n_threads: n_threads as usize },
+            _ => return -2,
+        };
+    }
+    0
+}
+
+// ── Time query — NEW ──────────────────────────────────────────────────────────
+
+/// Return current simulation time (ms).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sim_get_time(handle: *mut SimHandle, out_t: *mut c_float) -> c_int {
+    if handle.is_null() || out_t.is_null() { return -1; }
+    unsafe {
+        let sim = &*(*handle).sim;
+        *out_t = sim.time as c_float;
+    }
+    0
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_push_current(
-    handle: *mut SimHandle,
-    time: c_float,
-    target: c_int,
-    weight: c_float,
+    handle: *mut SimHandle, time: c_float, target: c_int, weight: c_float,
 ) -> c_int {
-    if handle.is_null() {
-        return -1;
-    }
-    if target < 0 {
-        return -2;
-    }
-
+    if handle.is_null() { return -1; }
+    if target < 0 { return -2; }
     unsafe {
         let sim = &mut *(*handle).sim;
-        let n = sim.neurons.as_ref().len();
-        let idx = target as usize;
-        if idx >= n {
-            return -2;
-        }
-        // model_type = 0 => current-based; e_rev is ignored
-        sim.push_event(time, idx, weight, 0u8, 0.0);
+        if target as usize >= sim.neurons.as_ref().len() { return -2; }
+        sim.push_event(time, target as usize, weight, 0u8, 0.0);
     }
     0
 }
 
-// ----------------------
-// Spike log access
-// ----------------------
+// ── Spike log ────────────────────────────────────────────────────────────────
 
-/// Return the number of spikes recorded.
-///
-/// # Safety
-/// - `handle` must be a valid, non-null pointer returned by `sim_create_basic`.
-/// - The handle must not have been freed.
-/// - No concurrent mutation of the simulation may occur during this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_spike_count(handle: *mut SimHandle) -> c_int {
-    if handle.is_null() {
-        return -1;
-    }
-    unsafe {
-        let sim = &*(*handle).sim;
-        sim.spike_log.len() as c_int
-    }
+    if handle.is_null() { return -1; }
+    unsafe { (*(*handle).sim).spike_log.len() as c_int }
 }
 
-/// Clear the spike log.
-///
-/// # Safety
-/// - `handle` must be a valid, non-null pointer returned by `sim_create_basic`.
-/// - The handle must not have been freed.
-/// - No concurrent access to the simulation is allowed during this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_clear_spikes(handle: *mut SimHandle) -> c_int {
-    if handle.is_null() {
-        return -1;
-    }
-    unsafe {
-        let sim = &mut *(*handle).sim;
-        sim.spike_log.clear();
-    }
+    if handle.is_null() { return -1; }
+    unsafe { (*(*handle).sim).spike_log.clear(); }
     0
 }
 
-/// Copy spike log entries into a user-provided buffer.
-///
-/// # Safety
-/// - `handle` must be a valid, non-null pointer returned by `sim_create_basic`.
-/// - `out_spikes` must point to writable memory for at least `max_spikes` entries.
-/// - The handle must not have been freed.
-/// - No concurrent mutation of the spike log may occur during this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_get_spikes(
-    handle: *mut SimHandle,
-    out_spikes: *mut FfiSpike,
-    max_spikes: c_int,
+    handle: *mut SimHandle, out: *mut FfiSpike, max: c_int,
 ) -> c_int {
-    if handle.is_null() || out_spikes.is_null() || max_spikes <= 0 {
-        return -1;
-    }
-
+    if handle.is_null() || out.is_null() || max <= 0 { return -1; }
     unsafe {
-        let sim = &*(*handle).sim;
-        let available = sim.spike_log.len() as c_int;
-        let to_copy = available.min(max_spikes);
-
-        // SAFETY: caller must ensure out_spikes points to valid writable memory for `to_copy` elements.
-        let slice = std::slice::from_raw_parts_mut(out_spikes, to_copy as usize);
-        for (i, (t, nid)) in sim.spike_log.iter().take(to_copy as usize).enumerate() {
-            slice[i] = FfiSpike {
-                time: *t as c_float,
-                neuron_id: *nid as c_int,
-            };
+        let log = &(*(*handle).sim).spike_log;
+        let n = (log.len() as c_int).min(max);
+        let slice = std::slice::from_raw_parts_mut(out, n as usize);
+        for (i, (t, nid)) in log.iter().take(n as usize).enumerate() {
+            slice[i] = FfiSpike { time: *t as c_float, neuron_id: *nid as c_int };
         }
-        to_copy
+        n
     }
 }
 
-// ----------------------
-// Voltage / probe access
-// ----------------------
+// ── Voltage ──────────────────────────────────────────────────────────────────
 
-/// Read the membrane potential of a neuron.
-///
-/// # Safety
-/// - `handle` must be a valid, non-null pointer returned by `sim_create_basic`.
-/// - `out_v` must point to valid writable memory.
-/// - The handle must not have been freed.
-/// - No concurrent mutation of neuron state may occur during this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_get_voltage(
-    handle: *mut SimHandle,
-    neuron: c_int,
-    out_v: *mut c_float,
+    handle: *mut SimHandle, neuron: c_int, out_v: *mut c_float,
 ) -> c_int {
-    if handle.is_null() || out_v.is_null() {
-        return -1;
-    }
-    if neuron < 0 {
-        return -2;
-    }
-
+    if handle.is_null() || out_v.is_null() { return -1; }
+    if neuron < 0 { return -2; }
     unsafe {
         let sim = &*(*handle).sim;
-        let n = sim.neurons.as_ref().len();
-        let idx = neuron as usize;
-        if idx >= n {
-            return -2;
-        }
-        let v = sim.neurons.read_v(idx);
-        *out_v = v as c_float;
+        if neuron as usize >= sim.neurons.as_ref().len() { return -2; }
+        *out_v = sim.neurons.read_v(neuron as usize) as c_float;
     }
     0
 }
 
-// ----------------------
-// Checkpointing
-// ----------------------
+// ── Checkpointing ────────────────────────────────────────────────────────────
 
-/// Save the simulation state to disk.
-///
-/// # Safety
-/// - `handle` must be a valid, non-null pointer returned by `sim_create_basic`.
-/// - `path` must be a valid, null-terminated C string.
-/// - The handle must not have been freed.
-/// - No concurrent mutation of the simulation may occur during this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sim_save_checkpoint(
-    handle: *mut SimHandle,
-    path: *const c_char,
-) -> c_int {
-    if handle.is_null() || path.is_null() {
-        return -1;
-    }
-
-    // SAFETY: `path` is a C string pointer; caller must ensure it's valid.
-    let c_str = unsafe { CStr::from_ptr(path) };
-    let path_str = match c_str.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
+pub unsafe extern "C" fn sim_save_checkpoint(handle: *mut SimHandle, path: *const c_char) -> c_int {
+    if handle.is_null() || path.is_null() { return -1; }
+    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(s) => s, Err(_) => return -2,
     };
-
     unsafe {
         let sim = &*(*handle).sim;
-        let hash_path = format!("{}.sha256", path_str);
-        if let Err(e) = sim.save_state(path_str, &hash_path) {
-            eprintln!("save_state error: {}", e);
-            return -3;
-        }
+        let hash = format!("{}.sha256", path_str);
+        if sim.save_state(path_str, &hash).is_err() { return -3; }
     }
     0
+}
+
+/// Load a checkpoint and return a new handle. Caller owns the returned pointer.
+///
+/// # Safety
+/// `path` must be a valid null-terminated C string.
+/// The returned handle must be freed with `sim_free`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sim_load_checkpoint(
+    path: *const c_char, seed: c_ulong, n_threads: c_int,
+) -> *mut SimHandle {
+    if path.is_null() { return std::ptr::null_mut(); }
+    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(s) => s, Err(_) => return std::ptr::null_mut(),
+    };
+    match Simulation::load_state(path_str, seed, n_threads as usize) {
+        Ok(sim) => Box::into_raw(Box::new(SimHandle { sim: Box::into_raw(Box::new(sim)) })),
+        Err(e)  => { eprintln!("sim_load_checkpoint: {}", e); std::ptr::null_mut() }
+    }
 }

@@ -18,12 +18,14 @@ __pycache__/
 
 # =========================
 # Bench outputs
+# Should be reproduce by the command specify in README.md and github actions
 # =========================
 /bench/results/
 *.csv
 
 # =========================
 # Generated RPC code
+# Should be reproducible by the command specify in README.md and github actions
 # =========================
 neurosim_pb2.py
 neurosim_pb2_grpc.py

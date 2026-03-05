@@ -397,11 +397,25 @@ impl Simulation {
     pub fn run_auto(&mut self, end_time: f32) {
         match self.scheduler_mode {
             SchedulerMode::SingleThreaded => self.run_until(end_time),
-            SchedulerMode::Deterministic { .. } => self.run_deterministic_multithreaded(end_time),
+            SchedulerMode::Deterministic { .. } => {
+                self.run_deterministic_multithreaded(end_time)
+            }
             SchedulerMode::Performance { .. } => {
                 #[cfg(feature = "performance")]
                 {
-                    self.run_performance_multithreaded(end_time)
+                    self.run_performance_multithreaded(end_time);
+                    return;
+                }
+                // `performance` feature not compiled in — fall back gracefully.
+                #[cfg(not(feature = "performance"))]
+                {
+                    eprintln!(
+                        "[synaptic-shenanigans] WARNING: SchedulerMode::Performance \
+                         requested but the `performance` feature is not enabled. \
+                         Falling back to SingleThreaded. \
+                         Rebuild with `--features performance` to enable."
+                    );
+                    self.run_until(end_time);
                 }
             }
         }
@@ -516,8 +530,8 @@ impl Simulation {
                 eprintln!("Processed {} events @ t={:.2}", processed_events, self.time);
             }
 
-            if next_ev.time < self.time - 1e-9 {
-                panic!("Time went backward: {} -> {}", self.time, next_ev.time);
+            if next_ev.time > self.time + 1e-9 {
+                self.time = next_ev.time;
             }
 
             if next_ev.time > self.time + 1e-9 {

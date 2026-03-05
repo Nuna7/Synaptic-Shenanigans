@@ -2,11 +2,18 @@ mod lif;
 mod simulation;
 mod synapse;
 mod event;
+mod rpc;
 
 use lif::LifNeuron;
 use simulation::{replay_equal, Simulation, SchedulerMode};
 use synapse::Synapse;
 use std::env;
+
+use std::sync::Arc;
+use tonic::transport::Server;
+
+use rpc::{RpcService, SimStore};
+use rpc::pb::neuro_sim_server::NeuroSimServer;
 
 fn build_sim(seed: u64, n_threads: usize) -> Simulation {
     let neurons = LifNeuron::new(2, -65.0, -50.0, 20.0, 1.0, 1.0, 5.0);
@@ -47,30 +54,19 @@ fn main() {
     println!("replay_equal (same seed) => {}", equal);
 }
 
-// mod rpc;
-// mod simulation;
-// mod lif;
-// mod synapse;
-// mod event;
 
-// use std::sync::Arc;
-// use tonic::transport::Server;
+#[tokio::main]
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
+    let addr = "127.0.0.1:50051".parse()?;
+    let store = Arc::new(SimStore::new());
+    let service = RpcService::new(store);
 
-// use rpc::{RpcService, SimStore};
-// use rpc::pb::neuro_sim_server::NeuroSimServer;
+    println!("RPC server listening on {}", addr);
 
-// #[tokio::main]
-// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//     let addr = "127.0.0.1:50051".parse()?;
-//     let store = Arc::new(SimStore::new());
-//     let service = RpcService::new(store);
+    Server::builder()
+        .add_service(NeuroSimServer::new(service))
+        .serve(addr)
+        .await?;
 
-//     println!("RPC server listening on {}", addr);
-
-//     Server::builder()
-//         .add_service(NeuroSimServer::new(service))
-//         .serve(addr)
-//         .await?;
-
-//     Ok(())
-// }
+    Ok(())
+}
