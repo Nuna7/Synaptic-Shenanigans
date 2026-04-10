@@ -129,7 +129,7 @@ fn poisson_population_injects_into_simulation() {
 
     sim.run_auto(500.0);
     // At least some neurons should have spiked
-    assert!(sim.spike_log.len() > 0, "Simulation should produce spikes from Poisson drive");
+    assert!(!sim.spike_log.is_empty(), "Simulation should produce spikes from Poisson drive");
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn poisson_population_targeting_injects_only_to_targets() {
     // Only neurons 0, 5, 10 should fire (others receive no input)
     let neuron_ids: std::collections::HashSet<usize> = sim.spike_log.iter().map(|&(_,nid)| nid).collect();
     for &nid in &[0usize, 5, 10] {
-        assert!(neuron_ids.contains(&nid) || true, // weak assertion, may miss low-rate spikes
+        assert!(neuron_ids.contains(&nid), // weak assertion, may miss low-rate spikes
             "Target neuron {} should have fired", nid);
     }
 }
@@ -176,7 +176,7 @@ fn stimulus_pattern_sinusoidal_stays_non_negative() {
     // Sinusoidal can dip to base - amplitude = 2 > 0
     let spikes = pat.generate(0.0, 500.0);
     for &t in &spikes {
-        assert!(t >= 0.0 && t <= 500.0, "Spike out of bounds: {}", t);
+        assert!((0.0..=500.0).contains(&t), "Spike out of bounds: {}", t);
     }
 }
 

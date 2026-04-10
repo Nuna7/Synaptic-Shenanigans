@@ -81,7 +81,7 @@ fn main() {
     let pop = AdExPopulation::heterogeneous(50, AdExProfile::AdaptingRS, 0.15, 42);
     let mut total_spikes = 0usize;
     for _ in 0..1000 {
-        pop.step_range(&vec![500.0f32; 50], 0);
+        pop.step_range(&[500.0f32; 50], 0);
         total_spikes += (0..50).filter(|&i| pop.local_spiked(i)).count();
     }
     println!("  Total spikes: {}   Mean rate: {:.1} Hz",

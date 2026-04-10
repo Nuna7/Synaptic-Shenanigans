@@ -158,7 +158,7 @@ impl Synapse {
 pub fn synapse_current(model_type: u8, weight: f32, v_post: f32, e_rev: f32) -> f32 {
     match model_type {
         0 => weight,                           // current-based: I = weight
-        1 | 2 | 3 | 4 | 5 => weight * (e_rev - v_post), // conductance-based
+        1..=5 => weight * (e_rev - v_post), // conductance-based
         _ => 0.0,
     }
     

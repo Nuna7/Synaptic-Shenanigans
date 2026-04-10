@@ -33,7 +33,6 @@ fn sync_spikes(n: usize, period_ms: f32, duration_ms: f32) -> Vec<(f32, usize)> 
 /// Generate asynchronous independent Poisson spikes.
 fn async_spikes(n: usize, rate_hz: f32, duration_ms: f32, seed: u64) -> Vec<(f32, usize)> {
     use rand::SeedableRng;
-    use rand::Rng;
     use rand_chacha::ChaCha20Rng;
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
     let lambda = rate_hz / 1000.0;

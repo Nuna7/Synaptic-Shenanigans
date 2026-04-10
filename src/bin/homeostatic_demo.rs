@@ -11,7 +11,6 @@ use synaptic_shenanigans::synapse::Synapse;
 use synaptic_shenanigans::simulation::{Simulation, SchedulerMode};
 use synaptic_shenanigans::homeostatic::{HomeostaticState, HomeostaticConfig};
 use synaptic_shenanigans::poisson::PoissonPopulation;
-use synaptic_shenanigans::metrics::ISIStats;
 use std::io::Write;
 
 fn main() {
@@ -27,7 +26,6 @@ fn main() {
 
     let phase_ms = [1000.0f32, 1000.0f32, 3000.0f32];
     let phase_rates = [5.0f32, 50.0f32, 50.0f32]; // input Poisson rates (Hz)
-    let total_ms: f32 = phase_ms.iter().sum();
 
     let neurons = LifNeuron::new(n, -65.0, -50.0, 20.0, 1.0, 1.0, 5.0);
     let syn = Synapse::new();

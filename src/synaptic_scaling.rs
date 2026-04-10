@@ -115,7 +115,7 @@ impl SynapticScaling {
         &mut self,
         t_now: f32,
         post_vec: &[usize],
-        weights: &mut Vec<f32>,
+        weights: &mut [f32],
     ) -> usize {
         if !self.config.enabled { return 0; }
         if t_now - self.last_update_time < self.config.update_interval_ms { return 0; }

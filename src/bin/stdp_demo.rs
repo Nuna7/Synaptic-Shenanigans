@@ -79,10 +79,8 @@ fn main() {
 
     let syn_pre_snapshot  = std::sync::Arc::clone(&sim.synapses).pre.clone();
     let syn_post_snapshot = std::sync::Arc::clone(&sim.synapses).post.clone();
-    let mut weight_history: Vec<Vec<f32>> = Vec::new();
+    let weight_history: Vec<Vec<f32>> = Vec::new();
 
-        // ---- Training loop (single continuous simulation) ----------------------
-    let total_duration = n_trials as f32 * trial_duration;
 
     println!("\n{:>6}  {:>12}  {:>12}  {:>12}",
         "Trial", "Mean W", "Max W", "STDP Updates");
@@ -161,7 +159,6 @@ fn main() {
     println!("\n=== Weight Evolution Summary ===");
     let final_weights = sim.synapses.weight.clone();
     let final_stats = StdpState::weight_stats(&final_weights);
-    let initial_weights = vec![3.0f32; n_synapses]; // or load from first snapshot
     let initial_mean = 3.0;
     let final_mean = final_stats.mean;
 

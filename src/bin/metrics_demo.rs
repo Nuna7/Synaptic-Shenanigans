@@ -9,7 +9,6 @@
 //!   cargo run --release --bin metrics_demo
 
 use synaptic_shenanigans::lif::LifNeuron;
-use synaptic_shenanigans::synapse::Synapse;
 use synaptic_shenanigans::simulation::{Simulation, SchedulerMode};
 use synaptic_shenanigans::network::{NetworkBuilder, EdgeParams};
 use synaptic_shenanigans::poisson::{PoissonPopulation, StimulusPattern};
@@ -127,7 +126,7 @@ fn main() {
     let ai = &regimes[0];
     let av = AvalancheResult::detect(&ai.spikes, ai.dur, 1.0);
     println!("{}", av.summary());
-    if av.sizes.len() > 0 {
+    if !av.sizes.is_empty() {
         let size_mean = av.sizes.iter().sum::<usize>() as f32 / av.sizes.len() as f32;
         println!("  Avalanche count: {}   Mean size: {:.1}", av.sizes.len(), size_mean);
     }

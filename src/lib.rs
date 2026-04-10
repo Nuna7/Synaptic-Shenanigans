@@ -42,7 +42,11 @@ pub struct FfiSpike { pub time: c_float, pub neuron_id: c_int }
 
 // ── Construction ──────────────────────────────────────────────────────────────
 
-/// Create a simulation with LIF neurons and empty synapse set.
+/// # Safety
+/// 
+/// - `handle` must be a valid, non-null pointer to a `SimHandle` created by `sim_create_basic`.
+/// - `handle` must not have been freed by `sim_free` yet.
+/// - This function must not be called concurrently with other functions using the same `handle` unless the handle is behind a mutex.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_create_basic(
     n_neurons: c_int, n_threads: c_int, seed: c_ulong,
@@ -52,7 +56,12 @@ pub unsafe extern "C" fn sim_create_basic(
     Box::into_raw(Box::new(SimHandle { sim: Box::into_raw(Box::new(sim)) }))
 }
 
-/// Free a simulation handle.
+
+/// # Safety
+///
+/// `handle` must be a valid, non-null pointer to a `SimHandle` previously returned by
+/// `sim_create_basic`. The handle must not have been freed. This function is not thread-safe:
+/// do not call concurrently with other `sim_*` functions on the same handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_free(handle: *mut SimHandle) {
     if handle.is_null() { return; }
@@ -62,8 +71,11 @@ pub unsafe extern "C" fn sim_free(handle: *mut SimHandle) {
     }
 }
 
-// ── Stepping ──────────────────────────────────────────────────────────────────
-
+/// # Safety
+///
+/// - `handle` must be valid and non-null, from `sim_create_basic`.
+/// - `end_time` must be finite, not NaN.
+/// - The caller must ensure no other thread mutates the simulation while this runs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_step_and_query(handle: *mut SimHandle, end_time: c_float) -> c_int {
     if handle.is_null() { return -1; }
@@ -75,9 +87,11 @@ pub unsafe extern "C" fn sim_step_and_query(handle: *mut SimHandle, end_time: c_
     0
 }
 
-// ── Scheduler control — NEW ───────────────────────────────────────────────────
-
-/// Set scheduler mode. mode=0 → SingleThreaded, mode=1 → Deterministic(n_threads).
+/// # Safety
+///
+/// - `handle` must be valid and non-null.
+/// - `mode` must be 0, 1, or 2 corresponding to valid scheduler variants.
+/// - `n_threads` must be > 0 if mode requires threading.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_set_scheduler(
     handle: *mut SimHandle, mode: c_int, n_threads: c_int,
@@ -94,9 +108,10 @@ pub unsafe extern "C" fn sim_set_scheduler(
     0
 }
 
-// ── Time query — NEW ──────────────────────────────────────────────────────────
-
-/// Return current simulation time (ms).
+/// # Safety
+///
+/// - `handle` must be valid and non-null.
+/// - `out_t` must be either null or a valid, writable pointer to `c_float`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_get_time(handle: *mut SimHandle, out_t: *mut c_float) -> c_int {
     if handle.is_null() || out_t.is_null() { return -1; }
@@ -107,8 +122,11 @@ pub unsafe extern "C" fn sim_get_time(handle: *mut SimHandle, out_t: *mut c_floa
     0
 }
 
-// ── Input ─────────────────────────────────────────────────────────────────────
-
+/// # Safety
+///
+/// - `handle` must be valid and non-null.
+/// - `time` and `weight` must be finite.
+/// - `target` must be a valid neuron index < population size.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_push_current(
     handle: *mut SimHandle, time: c_float, target: c_int, weight: c_float,
@@ -123,14 +141,18 @@ pub unsafe extern "C" fn sim_push_current(
     0
 }
 
-// ── Spike log ────────────────────────────────────────────────────────────────
-
+/// # Safety
+///
+/// `handle` must be valid and non-null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_spike_count(handle: *mut SimHandle) -> c_int {
     if handle.is_null() { return -1; }
     unsafe { (*(*handle).sim).spike_log.len() as c_int }
 }
 
+/// # Safety
+///
+/// `handle` must be valid and non-null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_clear_spikes(handle: *mut SimHandle) -> c_int {
     if handle.is_null() { return -1; }
@@ -138,6 +160,11 @@ pub unsafe extern "C" fn sim_clear_spikes(handle: *mut SimHandle) -> c_int {
     0
 }
 
+/// # Safety
+///
+/// - `handle` must be valid and non-null.
+/// - `out` must be valid for writes of `max * size_of::<FfiSpike>()` bytes if `max > 0`.
+/// - `max` must not be negative.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_get_spikes(
     handle: *mut SimHandle, out: *mut FfiSpike, max: c_int,
@@ -154,8 +181,12 @@ pub unsafe extern "C" fn sim_get_spikes(
     }
 }
 
-// ── Voltage ──────────────────────────────────────────────────────────────────
 
+/// # Safety
+///
+/// - `handle` must be valid and non-null.
+/// - `neuron` must be a valid index < population size.
+/// - `out_v` must be null or valid for writing one `c_float`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_get_voltage(
     handle: *mut SimHandle, neuron: c_int, out_v: *mut c_float,
@@ -170,8 +201,11 @@ pub unsafe extern "C" fn sim_get_voltage(
     0
 }
 
-// ── Checkpointing ────────────────────────────────────────────────────────────
-
+/// # Safety
+///
+/// - `handle` must be valid and non-null.
+/// - `path` must be a valid pointer to a null-terminated C string.
+/// - The filesystem path must be writable by this process.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sim_save_checkpoint(handle: *mut SimHandle, path: *const c_char) -> c_int {
     if handle.is_null() || path.is_null() { return -1; }

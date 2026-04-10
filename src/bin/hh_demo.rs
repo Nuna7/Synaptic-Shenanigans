@@ -79,7 +79,7 @@ fn main() {
     let mut izh_spike_steps: Vec<usize> = Vec::new();
     for step in 0..(trace_ms * 4) {
         izh.step_range(&[i_stim], 0);
-        izh_trace.push(izh.read_v(0) as f32);
+        izh_trace.push(izh.read_v(0));
         if izh.local_spiked(0) { izh_spike_steps.push(step); }
     }
 
@@ -113,7 +113,7 @@ fn main() {
     println!("\n=== Heterogeneous HH Population (100 neurons, 5% parameter noise) ===");
     let het = HHPopulation::heterogeneous(100, params.clone(), 0.05, 42);
     let mut total_spikes = 0usize;
-    for step in 0..1000 {
+    for _ in 0..1000 {
         let i_ext: Vec<f32> = (0..100).map(|i| {
             if i < 50 { i_stim } else { 0.0 }  // drive first 50, silence rest
         }).collect();

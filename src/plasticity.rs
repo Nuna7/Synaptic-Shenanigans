@@ -152,7 +152,7 @@ impl StdpState {
     /// Returns the number of synapses whose weights changed.
     pub fn flush_weight_updates(
         &mut self,
-        weights: &mut Vec<f32>,
+        weights: &mut [f32],
     ) -> usize {
         if !self.config.enabled {
             return 0;

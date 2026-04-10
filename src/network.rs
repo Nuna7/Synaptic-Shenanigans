@@ -101,7 +101,7 @@ impl NetworkBuilder {
     /// High `beta` → random graph (low clustering, low path length).  
     /// Sweet-spot around `beta` ≈ 0.1–0.2 gives high clustering AND short paths.
     pub fn small_world(n: usize, k: usize, beta: f64, ep: EdgeParams, seed: u64) -> Synapse {
-        assert!(k % 2 == 0, "k must be even for the ring lattice");
+        assert!(k.is_multiple_of(2), "k must be even for the ring lattice");
         assert!(k < n, "k must be < n");
 
         let mut rng = ChaCha20Rng::seed_from_u64(seed);
@@ -154,11 +154,11 @@ impl NetworkBuilder {
         let mut edges: Vec<(usize, usize)> = Vec::new();
 
         // Seed with a complete graph of the first m+1 nodes
-        for i in 0..=m {
+        for (i, degree_i) in degree.iter_mut().enumerate().take(m + 1) {
             for j in 0..=m {
                 if i != j {
                     edges.push((i, j));
-                    degree[i] += 1;
+                    *degree_i += 1;
                 }
             }
         }

@@ -2,6 +2,7 @@ mod lif;
 mod simulation;
 mod synapse;
 mod event;
+#[cfg(feature = "rpc")]
 mod rpc;
 
 use lif::LifNeuron;
@@ -54,7 +55,7 @@ fn main() {
     println!("replay_equal (same seed) => {}", equal);
 }
 
-
+#[allow(dead_code)]
 #[tokio::main]
 async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "127.0.0.1:50051".parse()?;

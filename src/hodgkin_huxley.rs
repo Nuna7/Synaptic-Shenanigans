@@ -71,7 +71,7 @@ impl HHParams {
     /// Temperature-scaled variant. Q10 ≈ 3 for HH kinetics.
     pub fn at_temperature(temp_c: f64) -> Self {
         let phi = 3.0f64.powf((temp_c - 6.3) / 10.0);
-        let mut p = Self::default();
+        let p = Self::default();
         // Scale rate constants by phi (absorbed into alpha/beta in step_range)
         // Store phi in g_na slot as a multiplier — accessed via a wrapper.
         // Simplification: return standard params; user can scale I_ext instead.
@@ -139,7 +139,7 @@ impl HHPopulation {
         let v_rest = -65.0f64;
         let (m0, h0, n0_g) = steady_state(v_rest);
 
-        let mut state = HHNeuronState {
+        let state = HHNeuronState {
             v:            (0..n).map(|_| AtomicCell::new(v_rest)).collect(),
             m:            (0..n).map(|_| AtomicCell::new(m0)).collect(),
             h:            (0..n).map(|_| AtomicCell::new(h0)).collect(),
@@ -241,7 +241,7 @@ impl NeuronPopulation for HHPopulation {
             }
 
             // Store updated state
-            self.state.v[idx].store(v.max(-100.0).min(60.0));
+            self.state.v[idx].store(v.clamp(-100.0, 60.0));
             self.state.m[idx].store(m);
             self.state.h[idx].store(h);
             self.state.n[idx].store(n);

@@ -12,13 +12,15 @@ pub mod pb {
 }
 
 use pb::*;
-use pb::neuro_sim_server::{NeuroSim, NeuroSimServer};
+use pb::neuro_sim_server::NeuroSim;
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct SimStore {
     sims: Mutex<Vec<Arc<Mutex<Simulation>>>>,
 }
 
+#[allow(dead_code)]
 impl SimStore {
     pub fn new() -> Self { Self::default() }
 
@@ -28,6 +30,7 @@ impl SimStore {
         (sims.len() - 1) as u64
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn get(&self, id: u64) -> Result<Arc<Mutex<Simulation>>, Status> {
         let sims = self.sims.lock().unwrap();
         sims.get(id as usize)
@@ -36,6 +39,7 @@ impl SimStore {
     }
 }
 
+#[allow(dead_code)]
 pub struct RpcService { store: Arc<SimStore> }
 impl RpcService {
     pub fn new(store: Arc<SimStore>) -> Self { Self { store } }

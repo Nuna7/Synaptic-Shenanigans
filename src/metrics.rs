@@ -444,7 +444,7 @@ pub struct ISIStats {
 }
 
 impl ISIStats {
-    pub fn compute(spikes: &[(f32, usize)], n_neurons: usize, duration_ms: f32, bin_ms: f32) -> Self {
+    pub fn compute(spikes: &[(f32, usize)], _n_neurons: usize, duration_ms: f32, bin_ms: f32) -> Self {
         let mut per_neuron: HashMap<usize, Vec<f32>> = HashMap::new();
         for &(t, nid) in spikes {
             per_neuron.entry(nid).or_default().push(t);

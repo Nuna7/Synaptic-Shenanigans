@@ -30,7 +30,6 @@
 //!   Turrigiano (2011). Cold Spring Harb. Perspect. Biol.
 
 use serde::{Deserialize, Serialize};
-use crossbeam::atomic::AtomicCell;
 
 /// Configuration for homeostatic plasticity.
 #[derive(Clone, Debug, Serialize, Deserialize)]

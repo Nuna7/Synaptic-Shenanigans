@@ -214,7 +214,7 @@ impl NeuronPopulation for IzhikevichPop {
                 }
             }
 
-            self.v[idx].store(v.max(-90.0).min(35.0)); // soft clamp for stability
+            self.v[idx].store(v.clamp(-90.0, 35.0)); // soft clamp for stability
             self.u[idx].store(u);
 
             if fired {

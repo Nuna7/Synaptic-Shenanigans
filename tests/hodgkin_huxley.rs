@@ -124,9 +124,9 @@ fn hh_heterogeneous_population_has_different_spike_times() {
     let hh = HHPopulation::heterogeneous(10, HHParams::default(), 0.1, 42);
     let mut spike_counts = vec![0usize; 10];
     for _ in 0..500 {
-        hh.step_range(&vec![10.0f32; 10], 0);
-        for i in 0..10 {
-            if hh.local_spiked(i) { spike_counts[i] += 1; }
+        hh.step_range(&[10.0f32; 10], 0);
+        for (i, spike_count) in spike_counts.iter_mut().enumerate().take(10) {
+            if hh.local_spiked(i) { *spike_count += 1; }
         }
     }
     // Different neurons should have different spike counts due to parameter noise
@@ -151,10 +151,8 @@ fn hh_refractory_period_exists_from_channel_kinetics() {
     let hh = HHPopulation::homogeneous(1, HHParams::default());
     let mut last_spike = None;
     let mut min_isi = f32::INFINITY;
-    let mut prev_spiked = false;
-    let mut t = 0usize;
 
-    for _ in 0..500 {
+    for (t, _) in (0..500).enumerate() {
         hh.step_range(&[10.0], 0);
         let spiked = hh.local_spiked(0);
         if spiked {
@@ -164,11 +162,11 @@ fn hh_refractory_period_exists_from_channel_kinetics() {
             }
             last_spike = Some(t);
         }
-        prev_spiked = spiked;
-        t += 1;
     }
 
-    assert!(min_isi > 5.0,
-        "Min ISI too short ({}ms) — HH refractory period should be >5ms", min_isi);
-    let _ = prev_spiked;
+    assert!(
+        min_isi > 5.0,
+        "Min ISI too short ({}ms) — HH refractory period should be >5ms",
+        min_isi
+    );
 }

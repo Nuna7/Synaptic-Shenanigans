@@ -56,7 +56,7 @@ fn adex_v_stays_in_range() {
     let pop = AdExPopulation::from_profile(1, AdExProfile::AdaptingRS);
     let (_, vs) = run_n(&pop, 500.0, 1000);
     for v in vs {
-        assert!(v >= -100.0 && v <= 5.0, "V out of range: {}", v);
+        assert!((-100.0..=5.0).contains(&v), "V out of range: {}", v);
     }
 }
 
@@ -118,8 +118,10 @@ fn adex_heterogeneous_produces_different_rates() {
     let pop = AdExPopulation::heterogeneous(10, AdExProfile::AdaptingRS, 0.15, 42);
     let mut counts = vec![0usize; 10];
     for _ in 0..1000 {
-        pop.step_range(&vec![500.0f32; 10], 0);
-        for i in 0..10 { if pop.local_spiked(i) { counts[i] += 1; } }
+        pop.step_range(&[500.0f32; 10], 0);
+        for (i, spike_count) in counts.iter_mut().enumerate().take(10) {
+            if pop.local_spiked(i) { *spike_count += 1; }
+        }
     }
     let unique: std::collections::HashSet<usize> = counts.into_iter().collect();
     assert!(unique.len() > 1, "Heterogeneous population should have different rates");
