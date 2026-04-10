@@ -129,6 +129,7 @@ impl NeuroSim for RpcService {
         Ok(Response::new(Empty {}))
     }
 
+    #[allow(clippy::result_large_err)]
     async fn stream_spikes(&self, req: Request<Handle>) -> Result<Response<Self::StreamSpikesStream>, Status> {
         let entry    = self.store.get(req.into_inner().id)?;
         let snapshot = entry.lock().unwrap().spike_log.clone();
