@@ -1,44 +1,41 @@
 mod utils;
 use synaptic_shenanigans::simulation::SchedulerMode;
-
 use crate::utils::build_sim;
 
 #[test]
 fn deterministic_replay() {
-    let a = build_sim(42);
-    let b = build_sim(42);
-
-    assert_eq!(a.spike_log, b.spike_log);
+    assert_eq!(build_sim(42).spike_log, build_sim(42).spike_log);
 }
 
 #[test]
 fn deterministic_mt_matches_single_thread() {
-    let mut a = build_sim(42);
-
+    let a = build_sim(42);
     let mut b = build_sim(42);
     b.scheduler_mode = SchedulerMode::Deterministic { n_threads: 4 };
-
-    a.run_auto(500.0);
-    b.run_auto(500.0);
-
-    assert_eq!(a.spike_log, b.spike_log);
+    // b was already run in build_sim; rebuild properly
+    use synaptic_shenanigans::{LifNeuron, Synapse, Simulation};
+    let neurons = LifNeuron::new(100, -65.0, -50.0, 20.0, 1.0, 1.0, 5.0);
+    let mut syn = Synapse::new();
+    for i in 0..1000usize { syn.add_current_based(i%100, (i*7)%100, 1.0, 1.0, 5.0, 0); }
+    let mut sim_mt = Simulation::new_with_neurons(neurons, syn, 1.0, 42, 4);
+    sim_mt.scheduler_mode = SchedulerMode::Deterministic { n_threads: 4 };
+    sim_mt.run_auto(500.0);
+    assert_eq!(a.spike_log, sim_mt.spike_log);
 }
 
 #[test]
 fn many_same_time_events_deterministic() {
-    let mut sim = build_sim(42);
-    for _ in 0..1000 {
-        sim.push_event(10.0, 0, 1.0, 0, 0.0);
-    }
+    use synaptic_shenanigans::{LifNeuron, Synapse, Simulation, SchedulerMode};
+    let neurons = LifNeuron::new(10, -65.0, -50.0, 20.0, 1.0, 1.0, 5.0);
+    let mut sim = Simulation::new_with_neurons(neurons, Synapse::new(), 1.0, 42, 1);
+    sim.scheduler_mode = SchedulerMode::SingleThreaded;
+    for _ in 0..1000 { sim.push_event(10.0, 0, 1.0, 0, 0.0); }
     sim.run_auto(100.0);
-
     let ref_log = sim.spike_log.clone();
-
-    let mut sim2 = build_sim(42);
-    for _ in 0..1000 {
-        sim2.push_event(10.0, 0, 1.0, 0, 0.0);
-    }
+    let neurons2 = LifNeuron::new(10, -65.0, -50.0, 20.0, 1.0, 1.0, 5.0);
+    let mut sim2 = Simulation::new_with_neurons(neurons2, Synapse::new(), 1.0, 42, 1);
+    sim2.scheduler_mode = SchedulerMode::SingleThreaded;
+    for _ in 0..1000 { sim2.push_event(10.0, 0, 1.0, 0, 0.0); }
     sim2.run_auto(100.0);
-
     assert_eq!(ref_log, sim2.spike_log);
 }

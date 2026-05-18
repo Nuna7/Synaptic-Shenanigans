@@ -1,29 +1,179 @@
+# .github/workflows/ci.yml
+#
+# Synaptic Shenanigans — Continuous Integration
+#
+# Jobs:
+#   rust-tests   – cargo test (all Rust unit + integration tests)
+#   python-ffi   – pytest tests/test_ffi.py  (cdylib FFI, no server needed)
+#   python-rpc   – pytest tests/test_rpc.py + test_ffi_rpc.py  (gRPC, server started)
+#   lint         – cargo clippy + rustfmt check
+#
+# The python-rpc job is marked continue-on-error because it requires the
+# gRPC server binary which takes the longest to build.  The ffi and rust jobs
+# are always required.
+
 name: CI
 
 on:
   push:
+    branches: ["main", "master", "dev"]
   pull_request:
+    branches: ["main", "master", "dev"]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  linux:
+
+  # ── Rust unit + integration tests ─────────────────────────────────────────
+
+  rust-tests:
+    name: Rust tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry + build artefacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "cargo-${{ matrix.os }}"
+
+      # protobuf compiler required for tonic_build (build.rs)
+      - name: Install protoc (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Run Rust tests
+        run: cargo test --release -- --test-threads=4
+
+      - name: Run Rust tests (rpc feature)
+        run: cargo test --release --features rpc -- --test-threads=4
+
+  # ── Lint ──────────────────────────────────────────────────────────────────
+
+  lint:
+    name: Lint (clippy + fmt)
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-      - name: Install system deps
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protoc
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: >
+          cargo clippy --all-targets --all-features
+          -- -D warnings
+
+  # ── Python FFI tests (no server required) ────────────────────────────────
+
+  python-ffi:
+    name: Python FFI tests
+    runs-on: ubuntu-latest
+    needs: rust-tests   # only run if Rust build passes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "cargo-ubuntu-latest"
+
+      - name: Install protoc
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: Build cdylib (release)
+        run: cargo build --release
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler python3-pip
+          pip install --upgrade pip
+          pip install pytest pytest-timeout
 
-      - name: Install Python deps
+      - name: Expose library path
+        # neurosim_ffi.py reads NEUROSIM_LIB; conftest.py also sets it.
         run: |
-          pip install grpcio grpcio-tools
+          LIB=$(ls target/release/libsynaptic_shenanigans.so \
+                   target/release/libsynaptic_shenanigans.dylib \
+                   2>/dev/null | head -1)
+          echo "NEUROSIM_LIB=${LIB}" >> "$GITHUB_ENV"
 
-      - name: Generate protobuf code
+      - name: Run FFI tests
+        run: pytest tests/test_ffi.py -v --timeout=60
+
+  # ── Python gRPC tests (server required) ──────────────────────────────────
+
+  python-rpc:
+    name: Python gRPC tests
+    runs-on: ubuntu-latest
+    needs: rust-tests
+    # The RPC job is allowed to fail without blocking the overall CI result
+    # because it requires the extra `rpc` feature and a running server.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "cargo-ubuntu-latest"
+
+      - name: Install protoc
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: Build cdylib + server (release, rpc feature)
+        run: cargo build --release --features rpc
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pytest pytest-timeout grpcio grpcio-tools
+
+      - name: Regenerate protobuf stubs (ensures they match the proto file)
         run: |
           python -m grpc_tools.protoc \
             -I rpc \
@@ -31,14 +181,58 @@ jobs:
             --grpc_python_out=. \
             rpc/neurosim.proto
 
-      - name: Build
-        run: cargo build --release
+      - name: Start gRPC server in background
+        run: |
+          ./target/release/neurosim_server &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          # Wait for the server to become ready (up to 10 s)
+          for i in $(seq 1 20); do
+            sleep 0.5
+            nc -z 127.0.0.1 50051 2>/dev/null && break
+          done
 
-      - name: Test
-        run: cargo test
+      - name: Run gRPC smoke tests
+        env:
+          NEUROSIM_ADDR: "127.0.0.1:50051"
+          NEUROSIM_SERVER_RUNNING: "1"
+          NEUROSIM_BIN: "./target/release/neurosim_server"
+        run: |
+          pytest tests/test_rpc.py tests/test_ffi_rpc.py -v --timeout=60
 
-      - name: Bench smoke
-        run: cargo run --release --bin bench_harness
+      - name: Stop gRPC server
+        if: always()
+        run: |
+          if [ -n "${SERVER_PID}" ]; then
+            kill "${SERVER_PID}" || true
+          fi
 
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+  # ── Criterion benchmarks (optional, informational only) ───────────────────
+
+  benchmarks:
+    name: Criterion benchmarks
+    runs-on: ubuntu-latest
+    # Benchmarks never block CI — they are informational only.
+    continue-on-error: true
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protoc
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: Run benchmarks (save baseline)
+        run: |
+          cargo bench --bench neuron_step -- --output-format bencher \
+            | tee bench/results/criterion_summary.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-results
+          path: bench/results/
+          retention-days: 30
