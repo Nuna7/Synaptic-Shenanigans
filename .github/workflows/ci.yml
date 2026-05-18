@@ -92,8 +92,7 @@ jobs:
 
       - name: cargo clippy
         run: >
-          cargo clippy --all-targets --all-features
-          -- -D warnings
+          cargo clippy --all-targets --all-features -- -D warnings
 
   # ── Python FFI tests (no server required) ────────────────────────────────
 
