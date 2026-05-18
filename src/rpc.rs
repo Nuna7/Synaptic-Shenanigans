@@ -173,12 +173,15 @@ impl NeuroSim for RpcService {
             .unwrap()
             .spike_log
             .clone();
+
+        #[allow(clippy::result_large_err)]
         let s = stream::iter(snapshot.into_iter().map(|(t, n)| {
             Ok(Spike {
                 time: t,
                 neuron: n as u32,
             })
         }));
+
         Ok(Response::new(Box::pin(s)))
     }
 }
