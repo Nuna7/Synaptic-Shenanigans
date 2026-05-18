@@ -196,7 +196,10 @@ pub extern "C" fn neurosim_free(id: u64) {
 /// The caller must ensure all raw pointers are valid,
 /// non-null where required, and properly aligned.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn neurosim_checkpoint(id: u64, path_ptr: *const std::os::raw::c_char) -> u32 {
+pub unsafe extern "C" fn neurosim_checkpoint(
+    id: u64,
+    path_ptr: *const std::os::raw::c_char,
+) -> u32 {
     let path = unsafe { std::ffi::CStr::from_ptr(path_ptr).to_str().unwrap_or("") };
     with_sim(id, |s| checkpoint::Checkpoint::save(s, path).is_ok() as u32).unwrap_or(0)
 }

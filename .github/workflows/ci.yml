@@ -227,9 +227,11 @@ jobs:
 
       - name: Run benchmarks (save baseline)
         run: |
+          mkdir -p bench/results
           cargo bench --bench neuron_step | tee bench/results/criterion_summary.txt
 
       - name: Upload benchmark results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: criterion-results
