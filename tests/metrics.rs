@@ -1,19 +1,37 @@
 use rand::Rng;
-use synaptic_shenanigans::metrics::{SynchronyIndex, BurstDetector, AvalancheResult,
-                                    ISIStats, power_spectrum, dominant_frequency};
+use synaptic_shenanigans::metrics::{
+    AvalancheResult, BurstDetector, ISIStats, SynchronyIndex, dominant_frequency,
+};
 
-fn sync_spikes(n: usize, period: f32, dur: f32) -> Vec<(f32,usize)> {
-    let mut s = Vec::new(); let mut t = period;
-    while t < dur { for nid in 0..n { s.push((t, nid)); } t += period; } s
+fn sync_spikes(n: usize, period: f32, dur: f32) -> Vec<(f32, usize)> {
+    let mut s = Vec::new();
+    let mut t = period;
+    while t < dur {
+        for nid in 0..n {
+            s.push((t, nid));
+        }
+        t += period;
+    }
+    s
 }
-fn async_spikes(n: usize, rate: f32, dur: f32, seed: u64) -> Vec<(f32,usize)> {
-    use rand::SeedableRng; use rand_chacha::ChaCha20Rng;
+fn async_spikes(n: usize, rate: f32, dur: f32, seed: u64) -> Vec<(f32, usize)> {
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
     let lam = rate / 1000.0;
     let mut s = Vec::new();
-    for nid in 0..n { let mut t = 0.0f32;
-        loop { let u: f32 = rng.r#gen(); t += -(1.0-u).ln()/lam; if t >= dur { break; } s.push((t,nid)); }
-    } s
+    for nid in 0..n {
+        let mut t = 0.0f32;
+        loop {
+            let u: f32 = rng.r#gen();
+            t += -(1.0 - u).ln() / lam;
+            if t >= dur {
+                break;
+            }
+            s.push((t, nid));
+        }
+    }
+    s
 }
 
 #[test]
@@ -33,11 +51,19 @@ fn synchrony_empty_returns_zero() {
 #[test]
 fn burst_finds_bursts_in_sync_data() {
     let sp = sync_spikes(50, 200.0, 2000.0);
-    assert!(!BurstDetector::new(50, 5.0, 5.0).detect(&sp, 2000.0).is_empty());
+    assert!(
+        !BurstDetector::new(50, 5.0, 5.0)
+            .detect(&sp, 2000.0)
+            .is_empty()
+    );
 }
 #[test]
 fn burst_nothing_in_sparse_data() {
-    assert!(BurstDetector::new(100, 20.0, 5.0).detect(&[(100.0, 0)], 2000.0).is_empty());
+    assert!(
+        BurstDetector::new(100, 20.0, 5.0)
+            .detect(&[(100.0, 0)], 2000.0)
+            .is_empty()
+    );
 }
 #[test]
 fn dominant_frequency_detects_40hz() {
@@ -53,7 +79,7 @@ fn avalanche_no_panic_on_empty() {
 }
 #[test]
 fn isi_regular_train_low_cv() {
-    let sp: Vec<(f32,usize)> = (0..40).map(|i| (i as f32 * 50.0 + 50.0, 0)).collect();
+    let sp: Vec<(f32, usize)> = (0..40).map(|i| (i as f32 * 50.0 + 50.0, 0)).collect();
     let s = ISIStats::compute(&sp, 1, 2000.0, 5.0);
     assert!(s.cv < 0.1, "CV={:.3}", s.cv);
 }

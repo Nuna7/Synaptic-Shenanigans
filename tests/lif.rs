@@ -1,5 +1,4 @@
-use synaptic_shenanigans::{LifNeuron, Simulation, Synapse, SchedulerMode};
-use synaptic_shenanigans::neurons::NeuronPopulation;
+use synaptic_shenanigans::{LifNeuron, SchedulerMode, Simulation, Synapse};
 
 #[test]
 fn lif_passive_decay() {
@@ -9,8 +8,9 @@ fn lif_passive_decay() {
     // set voltage above rest
     sim.neurons.set_threshold(0, -50.0); // ensure threshold unchanged
     // push zero current and run — voltage should decay toward rest
-    for _ in 0..100 { sim.push_event(sim.time + 0.001, 0, 0.0, 0, 0.0); }
-    let v_start = sim.neurons.read_v(0);
+    for _ in 0..100 {
+        sim.push_event(sim.time + 0.001, 0, 0.0, 0, 0.0);
+    }
     // just run passively
     sim.run_auto(100.0);
     let v_end = sim.neurons.read_v(0);

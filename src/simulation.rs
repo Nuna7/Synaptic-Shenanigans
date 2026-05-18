@@ -21,9 +21,9 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crossbeam::atomic::AtomicCell;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-use crossbeam::atomic::AtomicCell;
 
 use crate::event::Event;
 use crate::neurons::{LifNeuron, NeuronPopulation};
@@ -45,19 +45,26 @@ pub enum SchedulerMode {
 }
 
 // ── Thread-local buffers ──────────────────────────────────────────────────────
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ThreadLocal {
-    pub local_queue:     Vec<Event>,
+    pub local_queue: Vec<Event>,
     pub local_spike_log: Vec<(f32, usize, usize)>, // (time, neuron_id, thread_id)
 }
 
-impl Default for ThreadLocal {
-    fn default() -> Self { Self { local_queue: Vec::new(), local_spike_log: Vec::new() } }
-}
+// impl Default for ThreadLocal {
+//     fn default() -> Self {
+//         Self {
+//             local_queue: Vec::new(),
+//             local_spike_log: Vec::new(),
+//         }
+//     }
+// }
 
 impl ThreadLocal {
-    pub fn clear(&mut self) { self.local_queue.clear(); self.local_spike_log.clear(); }
+    pub fn clear(&mut self) {
+        self.local_queue.clear();
+        self.local_spike_log.clear();
+    }
 }
 
 // ── SimConfig (C ABI construction) ────────────────────────────────────────────
@@ -74,21 +81,21 @@ pub struct SimConfig {
 
 pub struct Simulation {
     /// Neuron population — any model, fully generic via trait object.
-    pub neurons:      Arc<dyn NeuronPopulation>,
-    pub synapses:     Arc<Synapse>,
-    pub event_queue:  BinaryHeap<Event>,
-    pub dt:           f32,
-    pub time:         f32,
-    pub seed:         u64,
-    rng:              ChaCha20Rng,
-    pub next_seq:     AtomicU64,
-    pub spike_log:    Vec<(f32, usize)>,
+    pub neurons: Arc<dyn NeuronPopulation>,
+    pub synapses: Arc<Synapse>,
+    pub event_queue: BinaryHeap<Event>,
+    pub dt: f32,
+    pub time: f32,
+    pub seed: u64,
+    _rng: ChaCha20Rng,
+    pub next_seq: AtomicU64,
+    pub spike_log: Vec<(f32, usize)>,
     pub thread_locals: Vec<ThreadLocal>,
-    pub num_threads:  usize,
-    pub pre_index:    Vec<Vec<usize>>,
-    pub verbose:      bool,
+    pub num_threads: usize,
+    pub pre_index: Vec<Vec<usize>>,
+    pub verbose: bool,
     pub scheduler_mode: SchedulerMode,
-    pub probes:       Vec<Vec<f32>>,
+    pub probes: Vec<Vec<f32>>,
 }
 
 impl Simulation {
@@ -125,14 +132,17 @@ impl Simulation {
         num_threads: usize,
     ) -> Self {
         let locals: Vec<ThreadLocal> = (0..num_threads).map(|_| ThreadLocal::default()).collect();
-        let rng    = ChaCha20Rng::seed_from_u64(seed);
+        let rng = ChaCha20Rng::seed_from_u64(seed);
         let arc_syn = Arc::new(synapses);
         let pre_index = arc_syn.build_pre_index(neurons.len());
         Self {
             neurons,
             synapses: arc_syn,
             event_queue: BinaryHeap::new(),
-            dt, time: 0.0, seed, rng,
+            dt,
+            time: 0.0,
+            seed,
+            _rng: rng,
             next_seq: AtomicU64::new(0),
             spike_log: Vec::new(),
             thread_locals: locals,
@@ -147,8 +157,12 @@ impl Simulation {
     /// Create from [`SimConfig`] (used by C ABI).
     pub fn new(cfg: SimConfig) -> Self {
         let sched = match cfg.scheduler {
-            1 => SchedulerMode::Deterministic { n_threads: cfg.n_threads },
-            2 => SchedulerMode::Performance   { n_threads: cfg.n_threads },
+            1 => SchedulerMode::Deterministic {
+                n_threads: cfg.n_threads,
+            },
+            2 => SchedulerMode::Performance {
+                n_threads: cfg.n_threads,
+            },
             _ => SchedulerMode::SingleThreaded,
         };
         let neurons = LifNeuron::new(cfg.n_neurons, -65.0, -50.0, 20.0, 1.0, 1.0, 5.0);
@@ -171,16 +185,20 @@ impl Simulation {
     /// Advance to `end_time`, choosing the scheduler set in `scheduler_mode`.
     pub fn run_auto(&mut self, end_time: f32) {
         match self.scheduler_mode {
-            SchedulerMode::SingleThreaded        => self.run_until(end_time),
-            SchedulerMode::Deterministic { .. }  => self.run_deterministic_multithreaded(end_time),
+            SchedulerMode::SingleThreaded => self.run_until(end_time),
+            SchedulerMode::Deterministic { .. } => self.run_deterministic_multithreaded(end_time),
             SchedulerMode::Performance { .. } => {
                 #[cfg(feature = "performance")]
-                { self.run_performance_multithreaded(end_time); return; }
+                {
+                    self.run_performance_multithreaded(end_time);
+                }
                 #[cfg(not(feature = "performance"))]
                 {
-                    eprintln!("[synaptic-shenanigans] WARNING: Performance mode \
+                    eprintln!(
+                        "[synaptic-shenanigans] WARNING: Performance mode \
                                requested but `performance` feature is not enabled. \
-                               Falling back to SingleThreaded.");
+                               Falling back to SingleThreaded."
+                    );
                     self.run_until(end_time);
                 }
             }
@@ -191,7 +209,9 @@ impl Simulation {
 
     pub fn run_until(&mut self, end_time: f32) {
         let n = self.neurons.len();
-        if n == 0 { return; }
+        if n == 0 {
+            return;
+        }
 
         let mut inputs = vec![0.0f32; n];
 
@@ -200,34 +220,53 @@ impl Simulation {
                 self.event_queue.push(next_ev);
                 break;
             }
-            if next_ev.time > self.time + 1e-9 { self.time = next_ev.time; }
+            if next_ev.time > self.time + 1e-9 {
+                self.time = next_ev.time;
+            }
 
             let mut events_at_t = vec![next_ev];
             while let Some(peek) = self.event_queue.peek() {
                 if (peek.time - self.time).abs() < 1e-6 {
                     events_at_t.push(self.event_queue.pop().unwrap());
-                } else { break; }
+                } else {
+                    break;
+                }
             }
 
-            for tl in &mut self.thread_locals { tl.local_queue.clear(); }
+            for tl in &mut self.thread_locals {
+                tl.local_queue.clear();
+            }
             for ev in events_at_t {
                 let owner = self.owner_of(ev.target);
                 self.thread_locals[owner].local_queue.push(ev);
             }
 
             let t_threads = self.num_threads;
-            let chunk = if t_threads <= 1 { n } else { n.div_ceil(t_threads) };
+            let chunk = if t_threads <= 1 {
+                n
+            } else {
+                n.div_ceil(t_threads)
+            };
 
             for tid in 0..self.num_threads {
                 let start = tid * chunk;
-                let end   = ((tid+1)*chunk).min(n);
-                if start >= end { continue; }
+                let end = ((tid + 1) * chunk).min(n);
+                if start >= end {
+                    continue;
+                }
 
                 let mut to_process = Vec::new();
                 std::mem::swap(&mut to_process, &mut self.thread_locals[tid].local_queue);
-                to_process.sort_by(|a,b| a.tick.cmp(&b.tick).then(a.seq.cmp(&b.seq)).then(a.target.cmp(&b.target)));
+                to_process.sort_by(|a, b| {
+                    a.tick
+                        .cmp(&b.tick)
+                        .then(a.seq.cmp(&b.seq))
+                        .then(a.target.cmp(&b.target))
+                });
 
-                for inp in inputs[start..end].iter_mut() { *inp = 0.0; }
+                for inp in inputs[start..end].iter_mut() {
+                    *inp = 0.0;
+                }
                 for ev in &to_process {
                     if ev.target >= start && ev.target < end {
                         let current = inputs[ev.target];
@@ -238,7 +277,9 @@ impl Simulation {
                         };
                     } else {
                         let owner = self.owner_of(ev.target);
-                        if owner != tid { self.thread_locals[owner].local_queue.push(ev.clone()); }
+                        if owner != tid {
+                            self.thread_locals[owner].local_queue.push(ev.clone());
+                        }
                     }
                 }
 
@@ -246,7 +287,9 @@ impl Simulation {
 
                 for nid in start..end {
                     if self.neurons.local_spiked(nid) {
-                        self.thread_locals[tid].local_spike_log.push((self.time, nid, tid));
+                        self.thread_locals[tid]
+                            .local_spike_log
+                            .push((self.time, nid, tid));
                         self.emit_synaptic_events(nid, end_time);
                     }
                 }
@@ -260,19 +303,24 @@ impl Simulation {
     fn emit_synaptic_events(&mut self, nid: usize, end_time: f32) {
         for &s_idx in &self.pre_index[nid] {
             if self.synapses.pre[s_idx] == nid {
-                let post       = self.synapses.post[s_idx];
-                let weight     = self.synapses.weight[s_idx];
-                let delay      = self.synapses.delay[s_idx];
+                let post = self.synapses.post[s_idx];
+                let weight = self.synapses.weight[s_idx];
+                let delay = self.synapses.delay[s_idx];
                 let model_type = self.synapses.model_type[s_idx];
-                let e_rev      = self.synapses.e_rev[s_idx];
-                let arrival    = self.time + delay;
+                let e_rev = self.synapses.e_rev[s_idx];
+                let arrival = self.time + delay;
                 if arrival <= end_time && arrival > self.time + EPS {
                     let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
                     let owner = self.owner_of(post);
                     let tick = self.time_to_tick(arrival);
                     self.thread_locals[owner].local_queue.push(Event {
                         tick,
-                        time: arrival, target: post, weight, seq, model_type, e_rev,
+                        time: arrival,
+                        target: post,
+                        weight,
+                        seq,
+                        model_type,
+                        e_rev,
                     });
                 }
             }
@@ -282,51 +330,68 @@ impl Simulation {
     // ── Deterministic multi-threaded loop ─────────────────────────────────────
 
     pub fn run_deterministic_multithreaded(&mut self, end_time: f32) {
-        if self.num_threads <= 1 { return self.run_until(end_time); }
+        if self.num_threads <= 1 {
+            return self.run_until(end_time);
+        }
         let n = self.neurons.len();
-        if n == 0 { return; }
+        if n == 0 {
+            return;
+        }
 
-        let t       = self.num_threads;
-        let chunk   = n.div_ceil(t);
+        let t = self.num_threads;
+        let chunk = n.div_ceil(t);
         let pre_idx = Arc::new(self.pre_index.clone());
-        let syn     = Arc::clone(&self.synapses);
+        let syn = Arc::clone(&self.synapses);
         let neurons = Arc::clone(&self.neurons);
 
         while let Some(next_ev) = self.event_queue.pop() {
-            if next_ev.time > end_time { self.event_queue.push(next_ev); break; }
+            if next_ev.time > end_time {
+                self.event_queue.push(next_ev);
+                break;
+            }
             self.time = next_ev.time;
 
             let mut events_at_t = vec![next_ev];
             while let Some(p) = self.event_queue.peek() {
-                if (p.time - self.time).abs() < 1e-6 { events_at_t.push(self.event_queue.pop().unwrap()); }
-                else { break; }
+                if (p.time - self.time).abs() < 1e-6 {
+                    events_at_t.push(self.event_queue.pop().unwrap());
+                } else {
+                    break;
+                }
             }
 
             let mut in_queues: Vec<Vec<Event>> = vec![Vec::new(); t];
-            for ev in events_at_t { in_queues[self.owner_of(ev.target)].push(ev); }
+            for ev in events_at_t {
+                in_queues[self.owner_of(ev.target)].push(ev);
+            }
 
             let mut partitions = neurons.split_indices(chunk);
             partitions.retain(|p| p.len > 0);
             let real_t = partitions.len();
-            let dt     = self.dt;
-            let cur    = self.time;
+            let dt = self.dt;
+            let cur = self.time;
 
             std::thread::scope(|scope| {
                 let mut handles = Vec::with_capacity(real_t);
                 for tid in 0..real_t {
-                    let syn       = Arc::clone(&syn);
-                    let pre_idx   = Arc::clone(&pre_idx);
-                    let neurons   = Arc::clone(&neurons);
-                    let in_q      = std::mem::take(&mut in_queues[tid]);
-                    let part      = partitions[tid];
+                    let syn = Arc::clone(&syn);
+                    let pre_idx = Arc::clone(&pre_idx);
+                    let neurons = Arc::clone(&neurons);
+                    let in_q = std::mem::take(&mut in_queues[tid]);
+                    let part = partitions[tid];
 
                     handles.push(scope.spawn(move || {
                         let mut inputs = vec![0.0f32; part.len];
                         for ev in &in_q {
-                            if ev.target >= part.start_index && ev.target < part.start_index + part.len {
+                            if ev.target >= part.start_index
+                                && ev.target < part.start_index + part.len
+                            {
                                 let li = ev.target - part.start_index;
-                                inputs[li] += if ev.model_type == 0 { ev.weight }
-                                              else { ev.weight * (ev.e_rev - neurons.read_v(ev.target)) };
+                                inputs[li] += if ev.model_type == 0 {
+                                    ev.weight
+                                } else {
+                                    ev.weight * (ev.e_rev - neurons.read_v(ev.target))
+                                };
                             }
                         }
                         neurons.step_range(&inputs, part.start_index);
@@ -344,8 +409,10 @@ impl Simulation {
                                             if arr <= cur + 2000.0 && arr > cur + EPS {
                                                 new_evs.push(Event {
                                                     tick: (arr / dt) as u64,
-                                                    time: arr, target: syn.post[s],
-                                                    weight: syn.weight[s], seq: 0,
+                                                    time: arr,
+                                                    target: syn.post[s],
+                                                    weight: syn.weight[s],
+                                                    seq: 0,
                                                     model_type: syn.model_type[s],
                                                     e_rev: syn.e_rev[s],
                                                 });
@@ -360,7 +427,9 @@ impl Simulation {
                 }
                 for h in handles {
                     let (tid, new_evs, logs) = h.join().expect("thread panicked");
-                    for (t, nid, _) in logs { self.thread_locals[tid].local_spike_log.push((t,nid,tid)); }
+                    for (t, nid, _) in logs {
+                        self.thread_locals[tid].local_spike_log.push((t, nid, tid));
+                    }
                     for mut ev in new_evs {
                         ev.seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
                         let owner = self.owner_of(ev.target);
@@ -374,29 +443,178 @@ impl Simulation {
         }
     }
 
+    #[cfg(feature = "performance")]
+    pub fn run_performance_multithreaded(&mut self, end_time: f32) {
+        use parking_lot::Mutex;
+        use rayon::prelude::*;
+
+        let n = self.neurons.len();
+        if n == 0 {
+            return;
+        }
+
+        let pre_index = Arc::new(self.pre_index.clone());
+        let syn = Arc::clone(&self.synapses);
+        let neurons = Arc::clone(&self.neurons);
+        let dt = self.dt;
+        let eps = EPS;
+
+        let global_new_events = Arc::new(Mutex::new(Vec::<Event>::new()));
+
+        while let Some(next_ev) = self.event_queue.pop() {
+            if next_ev.time > end_time {
+                self.event_queue.push(next_ev);
+                break;
+            }
+
+            self.time = next_ev.time;
+
+            // Gather epoch events
+            let mut events_at_t = vec![next_ev];
+            while let Some(peek) = self.event_queue.peek() {
+                if (peek.time - self.time).abs() < 1e-6 {
+                    events_at_t.push(self.event_queue.pop().unwrap());
+                } else {
+                    break;
+                }
+            }
+
+            // Each neuron accumulates input current independently.
+            let mut inputs = vec![0.0f32; n];
+            for ev in &events_at_t {
+                if ev.target < n {
+                    if ev.model_type == 0 {
+                        inputs[ev.target] += ev.weight;
+                    } else {
+                        let v_post = neurons.read_v(ev.target);
+                        inputs[ev.target] += ev.weight * (ev.e_rev - v_post);
+                    }
+                }
+            }
+
+            // Step all neuron partitions in parallel
+            let chunk = n.div_ceil(self.num_threads);
+            let partitions = neurons.split_indices(chunk);
+
+            partitions.par_iter().for_each(|part| {
+                let start = part.start_index;
+                let len = part.len;
+
+                // Slice of inputs for this region
+                let local_inputs = &inputs[start..start + len];
+
+                neurons.step_range(local_inputs, start);
+
+                // Collect new spikes and produce outgoing events
+                for local_i in 0..len {
+                    let nid = start + local_i;
+                    if neurons.local_spiked(nid) {
+                        // produce outgoing synaptic events
+                        if nid < pre_index.len() {
+                            for &s_idx in &pre_index[nid] {
+                                if syn.pre[s_idx] == nid {
+                                    let post = syn.post[s_idx];
+                                    let w = syn.weight[s_idx];
+                                    let d = syn.delay[s_idx];
+                                    let model = syn.model_type[s_idx];
+                                    let e_rev = syn.e_rev[s_idx];
+
+                                    let arrival = self.time + d;
+                                    if arrival <= end_time && arrival > self.time + eps {
+                                        let ev = Event {
+                                            tick: (arrival / dt) as u64,
+                                            time: arrival,
+                                            target: post,
+                                            weight: w,
+                                            seq: 0, // seq assigned later
+                                            model_type: model,
+                                            e_rev,
+                                        };
+                                        global_new_events.lock().push(ev);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Drain new events into thread locals (nondeterministic order)
+            let mut new_events = global_new_events.lock();
+            for mut ev in new_events.drain(..) {
+                ev.seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
+
+                let owner = self.owner_of(ev.target);
+                self.thread_locals[owner].local_queue.push(ev);
+            }
+
+            self.merge_queues_into_global();
+            self.merge_spike_logs();
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     fn merge_queues_into_global(&mut self) {
-        let mut all: Vec<Event> = self.thread_locals.iter_mut()
-            .flat_map(|tl| tl.local_queue.drain(..)).collect();
-        all.sort_by(|a,b| a.tick.cmp(&b.tick).then(a.seq.cmp(&b.seq)).then(a.target.cmp(&b.target)));
-        for ev in all { self.event_queue.push(ev); }
+        let mut all: Vec<Event> = self
+            .thread_locals
+            .iter_mut()
+            .flat_map(|tl| tl.local_queue.drain(..))
+            .collect();
+        all.sort_by(|a, b| {
+            a.tick
+                .cmp(&b.tick)
+                .then(a.seq.cmp(&b.seq))
+                .then(a.target.cmp(&b.target))
+        });
+        for ev in all {
+            self.event_queue.push(ev);
+        }
     }
 
     fn merge_spike_logs(&mut self) {
-        let mut all: Vec<(f32,usize,usize)> = self.thread_locals.iter_mut().enumerate()
-            .flat_map(|(tid,tl)| tl.local_spike_log.drain(..).map(move|(t,n,_)|(t,n,tid)))
+        let mut all: Vec<(f32, usize, usize)> = self
+            .thread_locals
+            .iter_mut()
+            .enumerate()
+            .flat_map(|(tid, tl)| {
+                tl.local_spike_log
+                    .drain(..)
+                    .map(move |(t, n, _)| (t, n, tid))
+            })
             .collect();
-        all.sort_by(|a,b| a.0.partial_cmp(&b.0).unwrap().then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
-        for (t,n,_) in all { self.spike_log.push((t,n)); }
+        all.sort_by(|a, b| {
+            a.0.partial_cmp(&b.0)
+                .unwrap()
+                .then(a.1.cmp(&b.1))
+                .then(a.2.cmp(&b.2))
+        });
+        for (t, n, _) in all {
+            self.spike_log.push((t, n));
+        }
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    pub fn push_event(&mut self, time: f32, target: usize, weight: f32, model_type: u8, e_rev: f32) {
+    pub fn push_event(
+        &mut self,
+        time: f32,
+        target: usize,
+        weight: f32,
+        model_type: u8,
+        e_rev: f32,
+    ) {
         let tick = self.time_to_tick(time);
-        let seq  = self.next_seq.fetch_add(1, Ordering::Relaxed);
-        self.event_queue.push(Event { tick, time, target, weight, seq, model_type, e_rev });
+        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
+        self.event_queue.push(Event {
+            tick,
+            time,
+            target,
+            weight,
+            seq,
+            model_type,
+            e_rev,
+        });
     }
 
     pub fn inject_spike(&mut self, neuron: u32, _weight: f32) {
@@ -407,19 +625,31 @@ impl Simulation {
                     let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
                     let arr = self.time + self.synapses.delay[s];
                     self.event_queue.push(Event {
-                        tick: self.time_to_tick(arr), time: arr,
-                        target: self.synapses.post[s], weight: self.synapses.weight[s],
-                        seq, model_type: self.synapses.model_type[s], e_rev: self.synapses.e_rev[s],
+                        tick: self.time_to_tick(arr),
+                        time: arr,
+                        target: self.synapses.post[s],
+                        weight: self.synapses.weight[s],
+                        seq,
+                        model_type: self.synapses.model_type[s],
+                        e_rev: self.synapses.e_rev[s],
                     });
                 }
             }
         }
     }
 
-    pub fn get_all_voltages(&self) -> Vec<f32> { self.neurons.snapshot_v() }
-    pub fn current_time(&self) -> f32           { self.time }
-    pub fn spike_count(&self) -> usize          { self.spike_log.len() }
-    pub fn clear_spikes(&mut self)              { self.spike_log.clear(); }
+    pub fn get_all_voltages(&self) -> Vec<f32> {
+        self.neurons.snapshot_v()
+    }
+    pub fn current_time(&self) -> f32 {
+        self.time
+    }
+    pub fn spike_count(&self) -> usize {
+        self.spike_log.len()
+    }
+    pub fn clear_spikes(&mut self) {
+        self.spike_log.clear();
+    }
 
     pub fn step_until(&mut self, until_ms: f32) -> Vec<(f32, usize)> {
         let before = self.spike_log.len();
@@ -436,8 +666,15 @@ impl Simulation {
         self.probes.push(self.neurons.snapshot_v());
     }
 
-    pub fn advance_step(&mut self)             { let t = self.time + self.dt; self.run_auto(t); }
-    pub fn advance_steps(&mut self, n: usize)  { for _ in 0..n { self.advance_step(); } }
+    pub fn advance_step(&mut self) {
+        let t = self.time + self.dt;
+        self.run_auto(t);
+    }
+    pub fn advance_steps(&mut self, n: usize) {
+        for _ in 0..n {
+            self.advance_step();
+        }
+    }
 
     // ── Checkpoint ────────────────────────────────────────────────────────────
 
@@ -474,8 +711,8 @@ impl Simulation {
         let n = self.neurons.len();
         // Try to downcast to LifNeuron for full fidelity.
         // (Other models get voltage-only snapshots.)
-        let (v_rest, tau_m, v_thresh_v, r_m, dt_vec, refract_period, spiked, refract, refract_t)
-            = if let Some(lif) = self.neurons.as_ref().as_any().downcast_ref::<LifNeuron>() {
+        let (v_rest, tau_m, v_thresh_v, r_m, dt_vec, refract_period, spiked, refract, refract_t) =
+            if let Some(lif) = self.neurons.as_ref().as_any().downcast_ref::<LifNeuron>() {
                 (
                     lif.v_rest.clone(),
                     lif.tau_m.clone(),
@@ -489,9 +726,17 @@ impl Simulation {
                 )
             } else {
                 let thresholds = self.neurons.get_thresholds();
-                (vec![-65.0; n], vec![20.0; n], thresholds, vec![1.0; n],
-                 vec![1.0; n], vec![5.0; n],
-                 vec![false; n], vec![false; n], vec![0.0f32; n])
+                (
+                    vec![-65.0; n],
+                    vec![20.0; n],
+                    thresholds,
+                    vec![1.0; n],
+                    vec![1.0; n],
+                    vec![5.0; n],
+                    vec![false; n],
+                    vec![false; n],
+                    vec![0.0f32; n],
+                )
             };
 
         let snap = Snapshot {
@@ -501,9 +746,15 @@ impl Simulation {
             synapses: (*self.synapses).clone(),
             pre_index: self.pre_index.clone(),
             dt: self.dt,
-            v_rest, tau_m, v_thresh: v_thresh_v, r_m, dt_vec,
+            v_rest,
+            tau_m,
+            v_thresh: v_thresh_v,
+            r_m,
+            dt_vec,
             refractory_period: refract_period,
-            spiked, refractory: refract, refractory_timer: refract_t,
+            spiked,
+            refractory: refract,
+            refractory_timer: refract_t,
         };
 
         let encoded = bincode::serialize(&snap)
@@ -540,19 +791,24 @@ impl Simulation {
             .map_err(|e| std::io::Error::other(format!("bincode: {e}")))?;
 
         let neurons = LifNeuron {
-            v:                 snap.v.into_iter().map(AtomicCell::new).collect(),
-            v_rest:            snap.v_rest,
-            tau_m:             snap.tau_m,
-            v_thresh:          snap.v_thresh.into_iter().map(AtomicCell::new).collect(),
-            r_m:               snap.r_m,
-            dt:                snap.dt_vec,
-            spiked:            snap.spiked.into_iter().map(AtomicCell::new).collect(),
-            refractory:        snap.refractory.into_iter().map(AtomicCell::new).collect(),
-            refractory_timer:  snap.refractory_timer.into_iter().map(AtomicCell::new).collect(),
+            v: snap.v.into_iter().map(AtomicCell::new).collect(),
+            v_rest: snap.v_rest,
+            tau_m: snap.tau_m,
+            v_thresh: snap.v_thresh.into_iter().map(AtomicCell::new).collect(),
+            r_m: snap.r_m,
+            dt: snap.dt_vec,
+            spiked: snap.spiked.into_iter().map(AtomicCell::new).collect(),
+            refractory: snap.refractory.into_iter().map(AtomicCell::new).collect(),
+            refractory_timer: snap
+                .refractory_timer
+                .into_iter()
+                .map(AtomicCell::new)
+                .collect(),
             refractory_period: snap.refractory_period,
         };
 
-        let mut sim = Simulation::new_with_neurons(neurons, snap.synapses, snap.dt, seed, num_threads);
+        let mut sim =
+            Simulation::new_with_neurons(neurons, snap.synapses, snap.dt, seed, num_threads);
         sim.time = snap.time;
         sim.next_seq.store(snap.next_seq, Ordering::Relaxed);
         sim.pre_index = snap.pre_index;

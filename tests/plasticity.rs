@@ -1,9 +1,10 @@
 #[test]
 fn stdp_produces_weight_change() {
-    use synaptic_shenanigans::plasticity::{StdpState, StdpConfig};
+    use synaptic_shenanigans::plasticity::{StdpConfig, StdpState};
     let mut stdp = StdpState::new(2, 1, StdpConfig::default());
     let mut weights = vec![1.0f32];
-    let pre = vec![0usize]; let post = vec![1usize];
+    let pre = vec![0usize];
+    let post = vec![1usize];
     let pre_index = vec![vec![0], vec![]];
     stdp.accumulate_for_spike(0, 1.0, &pre, &post, &pre_index);
     stdp.accumulate_for_spike(1, 2.0, &pre, &post, &pre_index);

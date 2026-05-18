@@ -204,6 +204,8 @@ class NeuroSim:
         """Return the total number of spikes recorded so far."""
         self._require_open()
         return int(_lib.sim_spike_count(self._handle))
+    
+    get_spike_count = spike_count
 
     def get_spikes(self) -> List[Tuple[float, int]]:
         """

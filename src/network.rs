@@ -22,8 +22,8 @@
 //! let syn = NetworkBuilder::small_world(100, 4, 0.1, ep, 42);
 //! ```
 
-use rand::SeedableRng;
 use rand::Rng;
+use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
 use crate::synapse::Synapse;
@@ -47,7 +47,11 @@ pub struct EdgeParams {
 
 impl EdgeParams {
     pub fn simple(weight: f32, delay: f32) -> Self {
-        Self { weight, delay, ..Default::default() }
+        Self {
+            weight,
+            delay,
+            ..Default::default()
+        }
     }
 }
 
@@ -82,7 +86,9 @@ impl NetworkBuilder {
 
         for i in 0..n {
             for j in 0..n {
-                if i == j { continue; }
+                if i == j {
+                    continue;
+                }
                 if rng.gen_range(0.0..1.0) < p {
                     let is_inh = i < n_inh_cutoff;
                     add_edge(&mut syn, i, j, &ep, is_inh, &mut rng);
@@ -122,7 +128,9 @@ impl NetworkBuilder {
             if rng.gen_range(0.0..1.0) < beta {
                 let new_target = loop {
                     let t: usize = rng.gen_range(0..n);
-                    if t != edge.0 { break t; }
+                    if t != edge.0 {
+                        break t;
+                    }
                 };
                 edge.1 = new_target;
             }
@@ -166,7 +174,9 @@ impl NetworkBuilder {
         // Preferential attachment for remaining neurons
         for new_node in (m + 1)..n {
             let total_degree: usize = degree[..new_node].iter().sum();
-            if total_degree == 0 { continue; }
+            if total_degree == 0 {
+                continue;
+            }
 
             let mut targets_chosen: Vec<usize> = Vec::new();
             let mut attempts = 0;
@@ -266,23 +276,27 @@ impl NetworkMetrics {
     /// Compute basic metrics from a built synapse structure.
     pub fn compute(syn: &Synapse, n_neurons: usize) -> Self {
         let mut degree_out = vec![0usize; n_neurons];
-        let mut degree_in  = vec![0usize; n_neurons];
+        let mut degree_in = vec![0usize; n_neurons];
 
         for (&pre, &post) in syn.pre.iter().zip(syn.post.iter()) {
-            if pre < n_neurons { degree_out[pre] += 1; }
-            if post < n_neurons { degree_in[post] += 1; }
+            if pre < n_neurons {
+                degree_out[pre] += 1;
+            }
+            if post < n_neurons {
+                degree_in[post] += 1;
+            }
         }
 
         let mean_out = degree_out.iter().sum::<usize>() as f32 / n_neurons as f32;
-        let mean_in  = degree_in.iter().sum::<usize>()  as f32 / n_neurons as f32;
-        let max_out  = degree_out.iter().cloned().max().unwrap_or(0);
+        let mean_in = degree_in.iter().sum::<usize>() as f32 / n_neurons as f32;
+        let max_out = degree_out.iter().cloned().max().unwrap_or(0);
 
         Self {
             n_neurons,
             n_synapses: syn.len(),
-            mean_degree_in:  mean_in,
+            mean_degree_in: mean_in,
             mean_degree_out: mean_out,
-            max_degree_out:  max_out,
+            max_degree_out: max_out,
             clustering_approx: 0.0, // placeholder; full clustering requires triangle counting
         }
     }
@@ -290,10 +304,14 @@ impl NetworkMetrics {
 
 impl std::fmt::Display for NetworkMetrics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,
+        write!(
+            f,
             "neurons={} synapses={} mean_in={:.1} mean_out={:.1} max_out={}",
-            self.n_neurons, self.n_synapses,
-            self.mean_degree_in, self.mean_degree_out, self.max_degree_out
+            self.n_neurons,
+            self.n_synapses,
+            self.mean_degree_in,
+            self.mean_degree_out,
+            self.max_degree_out
         )
     }
 }
@@ -315,7 +333,8 @@ fn add_edge(
     if is_inh {
         // Inhibitory: conductance-based with reversal potential
         syn.add_conductance_based(
-            pre, post,
+            pre,
+            post,
             ep.weight * ep.inh_weight_scale,
             delay,
             ep.tau_syn,
@@ -325,7 +344,8 @@ fn add_edge(
     } else {
         // Excitatory: current-based
         syn.add_current_based(
-            pre, post,
+            pre,
+            post,
             ep.weight,
             delay,
             ep.tau_syn,

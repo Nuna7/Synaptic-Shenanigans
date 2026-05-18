@@ -11,15 +11,15 @@
 //! 2. Add `pub mod my_model;` and a re-export below.
 //! 3. Done — `Simulation::new_with_neurons` accepts it immediately.
 
-pub mod lif;
-pub mod izhikevich;
-pub mod hh;
 pub mod adex;
+pub mod hh;
+pub mod izhikevich;
+pub mod lif;
 
-pub use lif::LifNeuron;
+pub use adex::{AdExParams, AdExPopulation, AdExProfile};
+pub use hh::{HHParams, HHPopulation};
 pub use izhikevich::{IzhikevichPop, NeuronType};
-pub use hh::{HHPopulation, HHParams};
-pub use adex::{AdExPopulation, AdExProfile, AdExParams};
+pub use lif::LifNeuron;
 
 // ── Shared helper ─────────────────────────────────────────────────────────────
 
@@ -45,7 +45,9 @@ use std::any::Any;
 pub trait NeuronPopulation: Any + Send + Sync {
     // ── Size ──────────────────────────────────────────────────────────────────
     fn len(&self) -> usize;
-    fn is_empty(&self) -> bool { self.len() == 0 }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     fn as_any(&self) -> &dyn Any;
 
     // ── Partitioning ──────────────────────────────────────────────────────────

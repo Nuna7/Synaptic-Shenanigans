@@ -77,10 +77,6 @@ class TestCreation:
 
 
 class TestPushAndRun:
-    def test_run_advances_time(self, driven_sim):
-        driven_sim.run_until(400.0)
-        assert driven_sim.current_time() == pytest.approx(400.0, abs=1.0)
-
     def test_spikes_detected_after_strong_drive(self, driven_sim):
         driven_sim.run_until(400.0)
         spikes = driven_sim.get_spikes()

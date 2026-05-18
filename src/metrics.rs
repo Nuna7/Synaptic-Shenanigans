@@ -33,11 +33,11 @@ use std::collections::HashMap;
 /// χ ∈ (0.1, 0.3) → weakly synchronised (normal active cortex)
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SynchronyIndex {
-    pub chi:         f32,
-    pub pop_var:     f32,
-    pub mean_indiv:  f32,
-    pub n_neurons:   usize,
-    pub n_bins:      usize,
+    pub chi: f32,
+    pub pop_var: f32,
+    pub mean_indiv: f32,
+    pub n_neurons: usize,
+    pub n_bins: usize,
 }
 
 impl SynchronyIndex {
@@ -45,8 +45,15 @@ impl SynchronyIndex {
     ///
     /// `bin_ms` controls the time binning for rate estimation.
     /// Values of 1–5 ms are typical.
-    pub fn compute(spikes: &[(f32, usize)], n_neurons: usize, duration_ms: f32, bin_ms: f32) -> Self {
-        if spikes.is_empty() || n_neurons == 0 { return Self::default(); }
+    pub fn compute(
+        spikes: &[(f32, usize)],
+        n_neurons: usize,
+        duration_ms: f32,
+        bin_ms: f32,
+    ) -> Self {
+        if spikes.is_empty() || n_neurons == 0 {
+            return Self::default();
+        }
 
         let n_bins = (duration_ms / bin_ms).ceil() as usize;
 
@@ -66,8 +73,11 @@ impl SynchronyIndex {
 
         // Variance of population rate
         let pop_mean = pop_rate.iter().sum::<f64>() / pop_rate.len() as f64;
-        let pop_var  = pop_rate.iter().map(|&r| (r - pop_mean).powi(2)).sum::<f64>()
-                       / pop_rate.len() as f64;
+        let pop_var = pop_rate
+            .iter()
+            .map(|&r| (r - pop_mean).powi(2))
+            .sum::<f64>()
+            / pop_rate.len() as f64;
 
         // Mean of individual neuron variances
         let mut sum_indiv_var = 0.0f64;
@@ -79,9 +89,17 @@ impl SynchronyIndex {
             n_active += 1;
         }
         // Silent neurons contribute zero variance
-        let mean_indiv = if n_active > 0 { sum_indiv_var / n_neurons as f64 } else { 1e-10 };
+        let mean_indiv = if n_active > 0 {
+            sum_indiv_var / n_neurons as f64
+        } else {
+            1e-10
+        };
 
-        let chi = if mean_indiv > 1e-10 { (pop_var / mean_indiv).sqrt() as f32 } else { 0.0 };
+        let chi = if mean_indiv > 1e-10 {
+            (pop_var / mean_indiv).sqrt() as f32
+        } else {
+            0.0
+        };
 
         Self {
             chi: chi.clamp(0.0, 1.0),
@@ -93,17 +111,28 @@ impl SynchronyIndex {
     }
 
     pub fn state(&self) -> &'static str {
-        if self.chi < 0.05  { "Asynchronous Irregular (AI)" }
-        else if self.chi < 0.2  { "Weakly Synchronous" }
-        else if self.chi < 0.5  { "Moderately Synchronous" }
-        else                     { "Strongly Synchronous" }
+        if self.chi < 0.05 {
+            "Asynchronous Irregular (AI)"
+        } else if self.chi < 0.2 {
+            "Weakly Synchronous"
+        } else if self.chi < 0.5 {
+            "Moderately Synchronous"
+        } else {
+            "Strongly Synchronous"
+        }
     }
 }
 
 impl std::fmt::Display for SynchronyIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "χ = {:.4}  [{}]  (pop_var={:.4}, mean_indiv={:.4})",
-            self.chi, self.state(), self.pop_var, self.mean_indiv)
+        write!(
+            f,
+            "χ = {:.4}  [{}]  (pop_var={:.4}, mean_indiv={:.4})",
+            self.chi,
+            self.state(),
+            self.pop_var,
+            self.mean_indiv
+        )
     }
 }
 
@@ -115,7 +144,7 @@ pub struct Burst {
     /// Burst onset (ms).
     pub t_start: f32,
     /// Burst offset (ms).
-    pub t_end:   f32,
+    pub t_end: f32,
     /// Peak firing rate within the burst (Hz, population-level).
     pub peak_rate_hz: f32,
     /// Number of spikes in the burst.
@@ -127,20 +156,27 @@ pub struct Burst {
 }
 
 impl Burst {
-    pub fn duration_ms(&self) -> f32 { self.t_end - self.t_start }
+    pub fn duration_ms(&self) -> f32 {
+        self.t_end - self.t_start
+    }
 }
 
 /// Detect population bursts using a sliding-window threshold.
 pub struct BurstDetector {
-    pub bin_ms:        f32,
-    pub threshold_hz:  f32, // rate threshold for burst onset
+    pub bin_ms: f32,
+    pub threshold_hz: f32, // rate threshold for burst onset
     pub min_duration_ms: f32,
-    pub n_neurons:     usize,
+    pub n_neurons: usize,
 }
 
 impl BurstDetector {
     pub fn new(n_neurons: usize, threshold_hz: f32, bin_ms: f32) -> Self {
-        Self { bin_ms, threshold_hz, min_duration_ms: bin_ms, n_neurons }
+        Self {
+            bin_ms,
+            threshold_hz,
+            min_duration_ms: bin_ms,
+            n_neurons,
+        }
     }
 
     pub fn detect(&self, spikes: &[(f32, usize)], duration_ms: f32) -> Vec<Burst> {
@@ -156,7 +192,8 @@ impl BurstDetector {
 
         // Convert counts to Hz
         let bin_s = self.bin_ms / 1000.0;
-        let rates: Vec<f32> = counts.iter()
+        let rates: Vec<f32> = counts
+            .iter()
             .map(|&c| c as f32 / (self.n_neurons as f32 * bin_s))
             .collect();
 
@@ -181,7 +218,7 @@ impl BurstDetector {
                 if rate < self.threshold_hz {
                     in_burst = false;
                     let t_start = burst_start as f32 * self.bin_ms;
-                    let t_end   = bin as f32 * self.bin_ms;
+                    let t_end = bin as f32 * self.bin_ms;
 
                     if t_end - t_start >= self.min_duration_ms && !burst_spikes.is_empty() {
                         let n_spikes = burst_spikes.len();
@@ -205,20 +242,17 @@ impl BurstDetector {
                 }
             }
         }
-        
+
         if in_burst && !burst_spikes.is_empty() {
             let t_start = burst_start as f32 * self.bin_ms;
-            let t_end   = n_bins as f32 * self.bin_ms;
+            let t_end = n_bins as f32 * self.bin_ms;
 
             if t_end - t_start >= self.min_duration_ms {
                 let n_spikes = burst_spikes.len();
                 let participating: std::collections::HashSet<usize> =
                     burst_spikes.iter().cloned().collect();
                 let n_part = participating.len();
-                let peak_rate = rates[burst_start..]
-                    .iter()
-                    .cloned()
-                    .fold(0.0f32, f32::max);
+                let peak_rate = rates[burst_start..].iter().cloned().fold(0.0f32, f32::max);
 
                 bursts.push(Burst {
                     t_start,
@@ -230,7 +264,6 @@ impl BurstDetector {
                 });
             }
         }
-
 
         bursts
     }
@@ -252,7 +285,9 @@ pub fn power_spectrum(
     bin_ms: f32,
 ) -> (Vec<f32>, Vec<f32>) {
     let n_bins = (duration_ms / bin_ms).ceil() as usize;
-    if n_bins < 4 { return (vec![], vec![]); }
+    if n_bins < 4 {
+        return (vec![], vec![]);
+    }
 
     let mut counts = vec![0.0f32; n_bins];
     for &(t, _) in spikes {
@@ -297,7 +332,9 @@ pub fn dominant_frequency(
     max_hz: f32,
 ) -> Option<f32> {
     let (freqs, power) = power_spectrum(spikes, n_neurons, duration_ms, bin_ms);
-    freqs.iter().zip(power.iter())
+    freqs
+        .iter()
+        .zip(power.iter())
         .filter(|&(f, _)| *f >= min_hz && *f <= max_hz)
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
         .map(|(f, _)| *f)
@@ -342,14 +379,18 @@ impl AvalancheResult {
         let mut durations = Vec::new();
         let mut in_av = false;
         let mut cur_size = 0usize;
-        let mut cur_dur  = 0usize;
+        let mut cur_dur = 0usize;
         let mut active_bins = 0usize;
 
         for &c in &counts {
             if c > 0 {
-                if !in_av { in_av = true; cur_size = 0; cur_dur = 0; }
+                if !in_av {
+                    in_av = true;
+                    cur_size = 0;
+                    cur_dur = 0;
+                }
                 cur_size += c as usize;
-                cur_dur  += 1;
+                cur_dur += 1;
                 active_bins += 1;
             } else if in_av {
                 in_av = false;
@@ -357,7 +398,10 @@ impl AvalancheResult {
                 durations.push(cur_dur);
             }
         }
-        if in_av { sizes.push(cur_size); durations.push(cur_dur); }
+        if in_av {
+            sizes.push(cur_size);
+            durations.push(cur_dur);
+        }
 
         // Estimate power-law exponent via log-log linear regression
         let tau = fit_power_law(&sizes);
@@ -379,19 +423,29 @@ impl AvalancheResult {
     pub fn summary(&self) -> String {
         format!(
             "avalanches={} τ={:.3} R²={:.3} activity={:.1}% {}",
-            self.sizes.len(), self.tau, self.r_squared,
+            self.sizes.len(),
+            self.tau,
+            self.r_squared,
             self.activity_fraction * 100.0,
-            if self.is_critical() { "⚡ CRITICAL" } else { "" }
+            if self.is_critical() {
+                "⚡ CRITICAL"
+            } else {
+                ""
+            }
         )
     }
 }
 
 fn fit_power_law(sizes: &[usize]) -> f32 {
-    if sizes.len() < 4 { return 0.0; }
+    if sizes.len() < 4 {
+        return 0.0;
+    }
     // Log-log linear regression: log(count) ~ τ·log(size)
     let mut log_s = Vec::new();
     let mut counts_map: HashMap<usize, usize> = HashMap::new();
-    for &s in sizes { *counts_map.entry(s).or_insert(0) += 1; }
+    for &s in sizes {
+        *counts_map.entry(s).or_insert(0) += 1;
+    }
     let mut log_c = Vec::new();
     for (&s, &c) in &counts_map {
         if s > 0 && c > 0 {
@@ -399,35 +453,53 @@ fn fit_power_law(sizes: &[usize]) -> f32 {
             log_c.push((c as f32).ln());
         }
     }
-    if log_s.len() < 3 { return 0.0; }
+    if log_s.len() < 3 {
+        return 0.0;
+    }
     // OLS slope
     let n = log_s.len() as f32;
     let sx: f32 = log_s.iter().sum();
     let sy: f32 = log_c.iter().sum();
-    let sxx: f32 = log_s.iter().map(|&x| x*x).sum();
-    let sxy: f32 = log_s.iter().zip(log_c.iter()).map(|(&x,&y)| x*y).sum();
+    let sxx: f32 = log_s.iter().map(|&x| x * x).sum();
+    let sxy: f32 = log_s.iter().zip(log_c.iter()).map(|(&x, &y)| x * y).sum();
     let denom = n * sxx - sx * sx;
-    if denom.abs() < 1e-8 { return 0.0; }
+    if denom.abs() < 1e-8 {
+        return 0.0;
+    }
     (n * sxy - sx * sy) / denom
 }
 
 fn power_law_r2(sizes: &[usize], tau: f32) -> f32 {
-    if sizes.len() < 4 || tau == 0.0 { return 0.0; }
+    if sizes.len() < 4 || tau == 0.0 {
+        return 0.0;
+    }
     let mut counts_map: HashMap<usize, usize> = HashMap::new();
-    for &s in sizes { *counts_map.entry(s).or_insert(0) += 1; }
-    let log_c: Vec<f32> = counts_map.iter()
+    for &s in sizes {
+        *counts_map.entry(s).or_insert(0) += 1;
+    }
+    let log_c: Vec<f32> = counts_map
+        .iter()
         .filter(|&(s, _)| *s > 0)
         .map(|(&_, &c)| (c as f32).ln())
         .collect();
-    if log_c.is_empty() { return 0.0; }
+    if log_c.is_empty() {
+        return 0.0;
+    }
     let mean_y = log_c.iter().sum::<f32>() / log_c.len() as f32;
-    let predicted: Vec<f32> = counts_map.iter()
+    let predicted: Vec<f32> = counts_map
+        .iter()
         .filter(|&(s, _)| *s > 0)
         .map(|(&s, _)| tau * (s as f32).ln())
         .collect();
-    let ss_res: f32 = log_c.iter().zip(predicted.iter()).map(|(&y,&yp)| (y-yp).powi(2)).sum();
-    let ss_tot: f32 = log_c.iter().map(|&y| (y-mean_y).powi(2)).sum();
-    if ss_tot < 1e-10 { return 1.0; }
+    let ss_res: f32 = log_c
+        .iter()
+        .zip(predicted.iter())
+        .map(|(&y, &yp)| (y - yp).powi(2))
+        .sum();
+    let ss_tot: f32 = log_c.iter().map(|&y| (y - mean_y).powi(2)).sum();
+    if ss_tot < 1e-10 {
+        return 1.0;
+    }
     1.0 - ss_res / ss_tot
 }
 
@@ -436,15 +508,20 @@ fn power_law_r2(sizes: &[usize], tau: f32) -> f32 {
 /// Population-level ISI statistics.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ISIStats {
-    pub mean_isi_ms:  f32,
-    pub cv:           f32,   // coefficient of variation
-    pub fano_factor:  f32,   // variance-to-mean ratio of spike counts
-    pub total_isis:   usize,
-    pub n_active:     usize,
+    pub mean_isi_ms: f32,
+    pub cv: f32,          // coefficient of variation
+    pub fano_factor: f32, // variance-to-mean ratio of spike counts
+    pub total_isis: usize,
+    pub n_active: usize,
 }
 
 impl ISIStats {
-    pub fn compute(spikes: &[(f32, usize)], _n_neurons: usize, duration_ms: f32, bin_ms: f32) -> Self {
+    pub fn compute(
+        spikes: &[(f32, usize)],
+        _n_neurons: usize,
+        duration_ms: f32,
+        bin_ms: f32,
+    ) -> Self {
         let mut per_neuron: HashMap<usize, Vec<f32>> = HashMap::new();
         for &(t, nid) in spikes {
             per_neuron.entry(nid).or_default().push(t);
@@ -452,18 +529,20 @@ impl ISIStats {
 
         let mut all_isis = Vec::new();
         for times in per_neuron.values_mut() {
-            times.sort_by(|a,b| a.partial_cmp(b).unwrap());
+            times.sort_by(|a, b| a.partial_cmp(b).unwrap());
             for w in times.windows(2) {
                 all_isis.push(w[1] - w[0]);
             }
         }
 
         let total = all_isis.len();
-        if total == 0 { return Self::default(); }
+        if total == 0 {
+            return Self::default();
+        }
 
         let mean = all_isis.iter().sum::<f32>() / total as f32;
-        let var  = all_isis.iter().map(|&v| (v - mean).powi(2)).sum::<f32>() / total as f32;
-        let cv   = var.sqrt() / mean.max(1e-6);
+        let var = all_isis.iter().map(|&v| (v - mean).powi(2)).sum::<f32>() / total as f32;
+        let cv = var.sqrt() / mean.max(1e-6);
 
         // Fano factor: variance / mean of spike counts in bins
         let n_bins = (duration_ms / bin_ms).ceil() as usize;
@@ -473,8 +552,16 @@ impl ISIStats {
             counts[bin] += 1;
         }
         let mean_count = counts.iter().sum::<u32>() as f32 / n_bins as f32;
-        let var_count  = counts.iter().map(|&c| (c as f32 - mean_count).powi(2)).sum::<f32>() / n_bins as f32;
-        let fano = if mean_count > 1e-6 { var_count / mean_count } else { 0.0 };
+        let var_count = counts
+            .iter()
+            .map(|&c| (c as f32 - mean_count).powi(2))
+            .sum::<f32>()
+            / n_bins as f32;
+        let fano = if mean_count > 1e-6 {
+            var_count / mean_count
+        } else {
+            0.0
+        };
 
         Self {
             mean_isi_ms: mean,
@@ -488,7 +575,10 @@ impl ISIStats {
 
 impl std::fmt::Display for ISIStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "mean_ISI={:.1}ms  CV={:.3}  Fano={:.3}  active={}/total  n_isi={}",
-            self.mean_isi_ms, self.cv, self.fano_factor, self.n_active, self.total_isis)
+        write!(
+            f,
+            "mean_ISI={:.1}ms  CV={:.3}  Fano={:.3}  active={}/total  n_isi={}",
+            self.mean_isi_ms, self.cv, self.fano_factor, self.n_active, self.total_isis
+        )
     }
 }

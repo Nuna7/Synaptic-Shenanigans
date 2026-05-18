@@ -9,15 +9,15 @@
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::Arc;
-    use tonic::transport::Server;
-    use synaptic_shenanigans::rpc::{RpcService, SimStore};
     use synaptic_shenanigans::rpc::pb::neuro_sim_server::NeuroSimServer;
+    use synaptic_shenanigans::rpc::{RpcService, SimStore};
+    use tonic::transport::Server;
 
     let addr = std::env::var("NEUROSIM_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
         .parse()?;
 
-    let store   = Arc::new(SimStore::new());
+    let store = Arc::new(SimStore::new());
     let service = RpcService::new(store);
 
     println!("Synaptic-Shenanigans gRPC server listening on {}", addr);

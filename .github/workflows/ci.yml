@@ -136,7 +136,7 @@ jobs:
           echo "NEUROSIM_LIB=${LIB}" >> "$GITHUB_ENV"
 
       - name: Run FFI tests
-        run: pytest tests/test_ffi.py -v --timeout=60
+        run: pytest test_ffi.py -v --timeout=60
 
   # ── Python gRPC tests (server required) ──────────────────────────────────
 
@@ -183,7 +183,7 @@ jobs:
 
       - name: Start gRPC server in background
         run: |
-          ./target/release/neurosim_server &
+          ./target/release/rpc_server &
           echo "SERVER_PID=$!" >> "$GITHUB_ENV"
           # Wait for the server to become ready (up to 10 s)
           for i in $(seq 1 20); do
@@ -195,9 +195,9 @@ jobs:
         env:
           NEUROSIM_ADDR: "127.0.0.1:50051"
           NEUROSIM_SERVER_RUNNING: "1"
-          NEUROSIM_BIN: "./target/release/neurosim_server"
+          NEUROSIM_BIN: "./target/release/rpc_server"
         run: |
-          pytest tests/test_rpc.py tests/test_ffi_rpc.py -v --timeout=60
+          pytest test_rpc.py test_ffi_rpc.py -v --timeout=60
 
       - name: Stop gRPC server
         if: always()
@@ -227,8 +227,7 @@ jobs:
 
       - name: Run benchmarks (save baseline)
         run: |
-          cargo bench --bench neuron_step -- --output-format bencher \
-            | tee bench/results/criterion_summary.txt
+          cargo bench --bench neuron_step | tee bench/results/criterion_summary.txt
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4

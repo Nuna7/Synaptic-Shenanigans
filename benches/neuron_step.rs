@@ -1,14 +1,10 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use synaptic_shenanigans::lif::LifNeuron;
-use synaptic_shenanigans::lif::NeuronPopulation;
+use criterion::{Criterion, criterion_group, criterion_main};
+use synaptic_shenanigans::NeuronPopulation;
+use synaptic_shenanigans::neurons::lif::LifNeuron;
 
 fn bench_neuron_step(c: &mut Criterion) {
     let n = 10_000;
-    let neurons = LifNeuron::new(
-        n,
-        -65.0, -50.0, 20.0,
-        1.0, 1.0, 5.0,
-    );
+    let neurons = LifNeuron::new(n, -65.0, -50.0, 20.0, 1.0, 1.0, 5.0);
 
     let input = vec![1.0f32; n];
 

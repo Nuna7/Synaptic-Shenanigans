@@ -1,23 +1,27 @@
-use synaptic_shenanigans::{LifNeuron, Synapse, Simulation, SchedulerMode};
-use synaptic_shenanigans::input::poisson::{PoissonSource, PoissonPopulation, StimulusPattern, drive_background};
+use synaptic_shenanigans::input::poisson::{
+    PoissonPopulation, PoissonSource, StimulusPattern, drive_background,
+};
+use synaptic_shenanigans::{LifNeuron, SchedulerMode, Simulation, Synapse};
 
-const RATE: f32 = 20.0; const DUR: f32 = 10_000.0;
+const RATE: f32 = 20.0;
+const DUR: f32 = 10_000.0;
 
 #[test]
 fn poisson_mean_spike_count_correct() {
     let mut src = PoissonSource::new(RATE, 42);
     let n = src.generate(0.0, DUR).len() as f32;
     let exp = RATE * DUR / 1000.0;
-    assert!((n/exp - 1.0).abs() < 0.15, "expected ~{exp} got {n}");
+    assert!((n / exp - 1.0).abs() < 0.15, "expected ~{exp} got {n}");
 }
 #[test]
 fn poisson_cv_near_one() {
     let mut src = PoissonSource::new(RATE, 99);
     let spikes = src.generate(0.0, DUR);
-    let mut s = spikes.clone(); s.sort_by(|a,b| a.partial_cmp(b).unwrap());
-    let isis: Vec<f32> = s.windows(2).map(|w| w[1]-w[0]).collect();
+    let mut s = spikes.clone();
+    s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let isis: Vec<f32> = s.windows(2).map(|w| w[1] - w[0]).collect();
     let mean = isis.iter().sum::<f32>() / isis.len() as f32;
-    let var  = isis.iter().map(|&v|(v-mean).powi(2)).sum::<f32>() / isis.len() as f32;
+    let var = isis.iter().map(|&v| (v - mean).powi(2)).sum::<f32>() / isis.len() as f32;
     let cv = var.sqrt() / mean;
     assert!((cv - 1.0).abs() < 0.25, "CV={cv:.3}");
 }
@@ -53,6 +57,8 @@ fn drive_background_helper_works() {
 fn stimulus_step_respects_on_off() {
     let mut p = StimulusPattern::step(0.0, 100.0, 200.0, 400.0, 42);
     let sp = p.generate(0.0, 600.0);
-    for &t in &sp { assert!(t >= 200.0 && t < 400.0, "t={t} outside window"); }
+    for &t in &sp {
+        assert!((200.0..400.0).contains(&t), "t={t} outside window");
+    }
     assert!(!sp.is_empty());
 }
